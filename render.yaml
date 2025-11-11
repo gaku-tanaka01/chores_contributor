@@ -1,17 +1,15 @@
-# render.yaml
 services:
   - type: web
     name: chores-contributor-server
     env: go
-    plan: free
-    autoDeploy: true
-    buildCommand: go build -o server ./cmd/server
-    startCommand: ./server
-    healthCheckPath: /healthz
+    region: singapore  # ここを追加（asia側で最も近い）
+    buildCommand: go build -o app ./cmd/server
+    startCommand: ./app
     envVars:
-      - key: DATABASE_URL   # ダッシュボードで値を入れる（sync: false）
+      - key: DATABASE_URL
         sync: false
       - key: ADMIN_TOKEN
         sync: false
       - key: LINE_CHANNEL_SECRET
         sync: false
+
