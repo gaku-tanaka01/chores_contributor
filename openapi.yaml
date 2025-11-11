@@ -6,15 +6,13 @@ info:
 paths:
   /events/report:
     post:
-      summary: 家事/購入の報告
+      summary: 家事の報告
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              oneOf:
-                - $ref: '#/components/schemas/Chore'
-                - $ref: '#/components/schemas/Purchase'
+              $ref: '#/components/schemas/Chore'
       responses:
         "204":
           description: created
@@ -127,41 +125,23 @@ components:
   schemas:
     Chore:
       type: object
-      required: [group_id, user_id, type, minutes, source_msg_id]
+      required: [group_id, user_id, task, source_msg_id]
       properties:
         group_id:
           type: string
         user_id:
           type: string
+        task:
+          type: string
+          description: タスク辞書に登録された名前。候補が1件に確定しない場合はエラー。
+        option:
+          type: string
+          description: タスク固有のオプション（現状は未使用。将来拡張用）
         type:
           type: string
           enum: [chore]
-        category:
-          type: string
-        minutes:
-          type: integer
-          minimum: 1
-        source_msg_id:
-          type: string
-          minLength: 1
-          maxLength: 64
-        note:
-          type: string
-
-    Purchase:
-      type: object
-      required: [group_id, user_id, type, amount_yen, source_msg_id]
-      properties:
-        group_id:
-          type: string
-        user_id:
-          type: string
-        type:
-          type: string
-          enum: [purchase]
-        amount_yen:
-          type: integer
-          minimum: 1
+          description: 互換性のために残された任意項目です。指定する場合は常に `chore` を使用してください。
+          deprecated: true
         source_msg_id:
           type: string
           minLength: 1

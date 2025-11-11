@@ -12,7 +12,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +24,38 @@ import (
 
 type errResp struct {
 	Error string `json:"error"`
+}
+
+type lineWebhookPayload struct {
+	Destination string      `json:"destination"`
+	Events      []lineEvent `json:"events"`
+}
+
+type lineEvent struct {
+	Type    string      `json:"type"`
+	Source  lineSource  `json:"source"`
+	Message lineMessage `json:"message"`
+}
+
+type lineSource struct {
+	Type    string `json:"type"`
+	GroupID string `json:"groupId"`
+	RoomID  string `json:"roomId"`
+	UserID  string `json:"userId"`
+}
+
+type lineMessage struct {
+	ID      string       `json:"id"`
+	Type    string       `json:"type"`
+	Text    string       `json:"text"`
+	Mention *lineMention `json:"mention,omitempty"`
+}
+
+type lineMention struct {
+	Mentionees []struct {
+		Type   string `json:"type,omitempty"`
+		UserID string `json:"userId,omitempty"`
+	} `json:"mentionees"`
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
@@ -58,41 +89,103 @@ func verifyLINE(sig string, body []byte, secret string) bool {
 }
 
 // handleLineMessage LINEメッセージを家事報告に変換
-func handleLineMessage(ctx context.Context, sv *service.Service, e struct {
-	Source struct {
-		GroupID string `json:"groupId"`
-		UserID  string `json:"userId"`
-	} `json:"source"`
-	Message struct {
-		ID   string `json:"id"`
-		Text string `json:"text"`
-	} `json:"message"`
-}) {
-	// 例: "皿洗い 20" → category="皿洗い", minutes=20
-	fields := strings.Fields(e.Message.Text)
-	if len(fields) < 2 {
-		return
+func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e lineEvent) {
+	isGroupContext := e.Source.GroupID != "" || e.Source.RoomID != ""
+	if isGroupContext {
+		mentioned := false
+		if e.Message.Mention != nil {
+			for _, m := range e.Message.Mention.Mentionees {
+				if m.UserID == botID {
+					mentioned = true
+					break
+				}
+			}
+		}
+		if !mentioned {
+			return
+		}
 	}
-	cat := fields[0]
-	mins, err := strconv.Atoi(fields[1])
-	if err != nil || mins <= 0 {
+
+	// 例: "@bot 皿洗い" → task="皿洗い"
+	rawFields := strings.Fields(e.Message.Text)
+	fields := make([]string, 0, len(rawFields))
+	for _, f := range rawFields {
+		if strings.HasPrefix(f, "@") {
+			continue
+		}
+		fields = append(fields, f)
+	}
+	if len(fields) == 0 {
 		return
 	}
 
+	cmd := strings.ToLower(fields[0])
+	switch cmd {
+	case "me":
+		handleLineCommandMe(ctx, sv, e)
+		return
+	case "top":
+		handleLineCommandTop(ctx, sv, e)
+		return
+	case "help":
+		handleLineCommandHelp(ctx, sv, e)
+		return
+	}
+
+	task := fields[0]
+	var option *string
+	if len(fields) > 1 {
+		opt := fields[1]
+		option = &opt
+	}
+
+	groupID := e.Source.GroupID
+	if groupID == "" {
+		if e.Source.RoomID != "" {
+			groupID = e.Source.RoomID
+		} else {
+			groupID = e.Source.UserID
+		}
+	}
+
 	payload := service.ReportPayload{
-		GroupID:     e.Source.GroupID,
+		GroupID:     groupID,
 		UserID:      e.Source.UserID,
-		Type:        "chore",
-		Category:    &cat,
-		Minutes:     &mins,
+		Task:        task,
+		Option:      option,
 		SourceMsgID: &e.Message.ID,
 	}
 
 	if err := sv.Report(ctx, payload); err != nil {
 		// エラーログ出力（goroutine内なので標準ログを使用）
 		log.Printf("LINE webhook error: group=%s user=%s msg_id=%s error=%v",
-			e.Source.GroupID, e.Source.UserID, e.Message.ID, err)
+			groupID, e.Source.UserID, e.Message.ID, err)
+		return
 	}
+}
+
+func handleLineCommandMe(ctx context.Context, sv *service.Service, e lineEvent) {
+	groupID := e.Source.GroupID
+	if groupID == "" {
+		groupID = e.Source.UserID
+	}
+	log.Printf("LINE command @bot me received: group=%s user=%s", groupID, e.Source.UserID)
+}
+
+func handleLineCommandTop(ctx context.Context, sv *service.Service, e lineEvent) {
+	groupID := e.Source.GroupID
+	if groupID == "" {
+		groupID = e.Source.UserID
+	}
+	log.Printf("LINE command @bot top received: group=%s user=%s", groupID, e.Source.UserID)
+}
+
+func handleLineCommandHelp(ctx context.Context, sv *service.Service, e lineEvent) {
+	groupID := e.Source.GroupID
+	if groupID == "" {
+		groupID = e.Source.UserID
+	}
+	log.Printf("LINE command @bot help received: group=%s user=%s", groupID, e.Source.UserID)
 }
 
 func Router(sv *service.Service) http.Handler {
@@ -148,21 +241,7 @@ func Router(sv *service.Service) http.Handler {
 			return
 		}
 
-		var payload struct {
-			Events []struct {
-				Type   string `json:"type"`
-				Source struct {
-					GroupID string `json:"groupId"`
-					UserID  string `json:"userId"`
-				} `json:"source"`
-				Message struct {
-					ID   string `json:"id"`
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"message"`
-				ReplyToken string `json:"replyToken"`
-			} `json:"events"`
-		}
+		var payload lineWebhookPayload
 
 		if err := json.Unmarshal(body, &payload); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
@@ -171,34 +250,17 @@ func Router(sv *service.Service) http.Handler {
 
 		for _, e := range payload.Events {
 			if e.Type == "message" && e.Message.Type == "text" {
-				go handleLineMessage(r.Context(), sv, struct {
-					Source struct {
-						GroupID string `json:"groupId"`
-						UserID  string `json:"userId"`
-					} `json:"source"`
-					Message struct {
-						ID   string `json:"id"`
-						Text string `json:"text"`
-					} `json:"message"`
-				}{
-					Source: e.Source,
-					Message: struct {
-						ID   string `json:"id"`
-						Text string `json:"text"`
-					}{
-						ID:   e.Message.ID,
-						Text: e.Message.Text,
-					},
-				})
+				eventCopy := e
+				go handleLineMessage(r.Context(), sv, payload.Destination, eventCopy)
 			}
 		}
 
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	// 家事/購入の報告（HTTP版）
+	// 家事の報告（HTTP版）
 	// POST /events/report
-	// { "group_id": "default-house", "user_id": "u1", "type": "chore", "category": "皿洗い", "minutes": 15, "source_msg_id":"abc" }
+	// { "group_id": "default-house", "user_id": "u1", "task": "皿洗い", "source_msg_id": "abc" }
 	r.Post("/events/report", func(w http.ResponseWriter, r *http.Request) {
 		// Content-Typeガード
 		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
@@ -221,6 +283,18 @@ func Router(sv *service.Service) http.Handler {
 					"status":        "duplicate",
 					"source_msg_id": p.SourceMsgID,
 				})
+				return
+			}
+			var amb *service.TaskAmbiguousError
+			switch {
+			case errors.Is(err, service.ErrTaskNotFound):
+				writeErr(w, 400, "unknown task")
+				return
+			case errors.As(err, &amb):
+				writeErr(w, 400, "ambiguous task: "+strings.Join(amb.Candidates, ", "))
+				return
+			case errors.Is(err, service.ErrTaskAmbiguous):
+				writeErr(w, 400, "ambiguous task")
 				return
 			}
 			writeErr(w, 400, err.Error())

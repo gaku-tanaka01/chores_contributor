@@ -1,13 +1,14 @@
 # Chores Contributor
 
-家事・購入の報告を管理し、週次でポイント集計を行うAPIサーバー。
+家事の報告を管理し、週次でポイント集計を行うAPIサーバー。
 
 ## 機能
 
-- 家事/購入の報告（HTTP API + LINE Webhook）
+- 家事の報告（HTTP API + LINE Webhook）
 - 週次ポイント集計
 - カテゴリ重みの管理
 - 冪等性保証（重複報告の自動排除）
+- LINEコマンド（`@bot <task> [<option>]`・`@bot me`・`@bot top`・`@bot help`）
 
 ## セットアップ
 
@@ -64,7 +65,20 @@ docker-compose up
 
 ### 主要エンドポイント
 
-- `POST /events/report` - 家事/購入の報告
+- `POST /events/report` - 家事の報告
+`POST /events/report` の例:
+
+```bash
+curl -X POST http://localhost:8080/events/report \
+  -H "Content-Type: application/json" \
+  -d '{
+    "group_id": "default-house",
+    "user_id": "u1",
+    "task": "皿洗い",
+    "source_msg_id": "demo-123"
+  }'
+```
+
 - `GET /houses/{group}/weekly` - 週次集計
 - `PUT /admin/houses/{group}/categories/{name}` - カテゴリ重み編集
 - `POST /webhook` - LINE Webhook

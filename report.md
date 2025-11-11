@@ -26,14 +26,16 @@
 
 **実装箇所**: `internal/repo/repo.go`
 
-```85:93:internal/repo/repo.go
-	ct, err := tx.Exec(ctx, `
-INSERT INTO events(house_id,user_id,kind,category_id,minutes,amount_yen,points,source_msg_id,created_at,note)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+```95:107:internal/repo/repo.go
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO events(house_id,user_id,kind,category_id,points,source_msg_id,created_at,note)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 ON CONFLICT(house_id, source_msg_id) DO NOTHING
-`, houseID, userID, p.Kind, catID, p.Minutes, p.AmountYen, p.Points, p.SourceMsgID, p.Now, p.Note)
-	if err != nil { return err }
-	if ct.RowsAffected() == 0 {
+`, houseID, userID, KindChore, catID, p.Points, p.SourceMsgID, p.Now, p.Note)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
 		return ErrDuplicateEvent
 	}
 ```
@@ -164,25 +166,16 @@ ON CONFLICT(house_id,name) DO UPDATE SET weight=EXCLUDED.weight
 
 **問題**: service層でのバリデーションだけでは、別クライアントや将来のバグで素通りする可能性がある。
 
-**実装**: `db/migrations/0004_harden_idempotency.up.sql`
+**実装**: `db/migrations/000001_0001_init.up.sql`
 
-```1:10:db/migrations/0004_harden_idempotency.up.sql
--- 既存データにNULLがある場合の対応（一時IDで埋める）
-UPDATE events SET source_msg_id = 'migrated-' || id::text WHERE source_msg_id IS NULL;
-
--- NOT NULL制約の追加
-ALTER TABLE events
-  ALTER COLUMN source_msg_id SET NOT NULL;
-
--- 長さ制限（1〜64文字）
-ALTER TABLE events
-  ADD CONSTRAINT events_source_msg_len CHECK (char_length(source_msg_id) BETWEEN 1 AND 64);
-```
+- `events.source_msg_id` を `NOT NULL` に設定し、`(house_id, source_msg_id)` にユニーク制約を付与
+- `CONSTRAINT events_source_msg_len` で1〜64文字の長さ制限を明示
+- 初期マイグレーション段階で必須制約を定義しているため、後続マイグレーションに頼らず堅牢性を担保
 
 **効果**:
 - DBレベルで`source_msg_id`の必須性を保証
 - 長さ制限により暴走を防止
-- 既存データへのマイグレーションも考慮
+- 初期時点で制約が整うため、既存データの後追い修正が不要
 
 ### 2. センチネルエラー化
 
@@ -248,11 +241,19 @@ func normalizeCategory(s string) string {
 }
 ```
 
-```54:57:internal/service/service.go
-		if p.Category != nil {
-			normalized := normalizeCategory(*p.Category)
-			p.Category = &normalized
-			w, _ := s.rp.CategoryWeight(ctx, p.GroupID, normalized)
+```60:75:internal/service/service.go
+	def, err := resolveTask(strings.TrimSpace(p.Task))
+	if err != nil {
+		return err
+	}
+	canonical := normalizeCategory(def.Key)
+
+	wt := 1.0
+	w, _ := s.rp.CategoryWeight(ctx, p.GroupID, canonical)
+	if w > 0 {
+		wt = w
+	}
+	points := def.Points * wt
 ```
 
 **効果**:
@@ -302,14 +303,16 @@ func requireAdmin(next http.Handler) http.Handler {
 
 **実装**: `internal/repo/repo.go`
 
-```85:93:internal/repo/repo.go
-	ct, err := tx.Exec(ctx, `
-INSERT INTO events(house_id,user_id,kind,category_id,minutes,amount_yen,points,source_msg_id,created_at,note)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+```95:107:internal/repo/repo.go
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO events(house_id,user_id,kind,category_id,points,source_msg_id,created_at,note)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 ON CONFLICT(house_id, source_msg_id) DO NOTHING
-`, houseID, userID, p.Kind, catID, p.Minutes, p.AmountYen, p.Points, p.SourceMsgID, p.Now, p.Note)
-	if err != nil { return err }
-	if ct.RowsAffected() == 0 {
+`, houseID, userID, KindChore, catID, p.Points, p.SourceMsgID, p.Now, p.Note)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
 		return ErrDuplicateEvent
 	}
 ```
@@ -331,14 +334,10 @@ ON CONFLICT(house_id, source_msg_id) DO NOTHING
 
 ### 7. カバリングインデックス
 
-**実装**: `db/migrations/0003_indexes.up.sql`
+**実装**: `db/migrations/000001_0001_init.up.sql`
 
-```9:12:db/migrations/0003_indexes.up.sql
--- カバリングインデックス（週次集計クエリの最適化）
-CREATE INDEX IF NOT EXISTS idx_events_house_created_cover
-ON events(house_id, created_at)
-INCLUDE (points, user_id);
-```
+- `idx_events_house_created_cover`（INCLUDE句付きカバリングインデックス）を初期マイグレーションに同梱
+- 週次集計専用クエリのアクセスパターンを想定した複合インデックスを用意
 
 **効果**:
 - 週次集計クエリのヒープアクセスを削減
@@ -366,11 +365,14 @@ INCLUDE (points, user_id);
 
 **将来の拡張**: ユーザーごと一意にしたい場合は`(house_id, user_id, source_msg_id)`に変更可能。
 
-#### 9.2 purchaseのポイント係数
+#### 9.2 購入報告の廃止
 
-**現状**: ハードコード（10円=1pt）
+**判断**: 運用上のニーズがなくなったため、購入報告はサポート対象外とした。
 
-**将来の拡張**: `house_settings`テーブルに`yen_per_point`カラムが既に存在するため、外出しが容易。
+**影響**:
+- API・LINE Webhookは家事報告のみ受け付ける
+- DBの`events`テーブルから`amount_yen`を削除し、`kind`は常に`chore`
+- 将来復活させる場合は新たなマイグレーションで再追加可能
 
 ### 10. テスト最小セット
 

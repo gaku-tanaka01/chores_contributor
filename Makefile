@@ -43,9 +43,9 @@ help: ## このヘルプ
 	@echo "  make migrate-create name=x # 新規マイグレーション作成（seq, .sql）"
 	@echo "  make db-wait               # DB起動待ち（ヘルス待機）"
 	@echo "  make backup                # DBバックアップ作成"
+	@echo "  make db-truncate           # 主要テーブルをTRUNCATE（RESTART IDENTITY）"
 	@echo "  make migrate-up-safe       # バックアップ後にマイグレーション実行"
 	@echo "  make post-chore            # 家事報告のテスト送信"
-	@echo "  make post-buy              # 購入報告のテスト送信"
 	@echo "  make weekly               # 週次集計の取得"
 	@echo ""
 	@echo "env: DATABASE_URL=$(DATABASE_URL)"
@@ -114,17 +114,30 @@ db-wait:
 	done; \
 	echo "postgres not ready"; exit 1
 
+.PHONY: db-truncate
+db-truncate: db-wait
+	@read -p "truncate tables? this cannot be undone. continue? [y/N] " ans; \
+	if [ "$$ans" = "y" ] || [ "$$ans" = "Y" ]; then \
+		$(PSQL) -v ON_ERROR_STOP=1 -c '\
+			TRUNCATE TABLE \
+				events, \
+				categories, \
+				memberships, \
+				house_settings, \
+				houses, \
+				users \
+			RESTART IDENTITY CASCADE;'; \
+		echo "tables truncated."; \
+	else \
+		echo "aborted"; \
+	fi
+
 # ==== curl タスク（APIテスト用） ====
-.PHONY: post-chore post-buy weekly
+.PHONY: post-chore weekly
 post-chore:
 	@curl -sS -i -X POST http://localhost:$(PORT)/events/report \
 	  -H "Content-Type: application/json" \
-	  -d '{"group_id":"default-house","user_id":"u1","type":"chore","category":"皿洗い","minutes":15,"source_msg_id":"$${ID:-test-$$RANDOM}"}' | sed -n '1p'
-
-post-buy:
-	@curl -sS -i -X POST http://localhost:$(PORT)/events/report \
-	  -H "Content-Type: application/json" \
-	  -d '{"group_id":"default-house","user_id":"u1","type":"purchase","amount_yen":1200,"source_msg_id":"$${ID:-buy-$$RANDOM}"}' | sed -n '1p'
+	  -d '{"group_id":"default-house","user_id":"u1","task":"皿洗い","source_msg_id":"$${ID:-test-$$RANDOM}"}' | sed -n '1p'
 
 weekly:
 	@curl -sS "http://localhost:$(PORT)/houses/default-house/weekly" | jq .

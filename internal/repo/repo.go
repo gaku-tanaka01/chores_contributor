@@ -23,8 +23,7 @@ var (
 type EventKind string
 
 const (
-	KindChore    EventKind = "chore"
-	KindPurchase EventKind = "purchase"
+	KindChore EventKind = "chore"
 )
 
 type UpsertHouseUserParams struct {
@@ -36,10 +35,7 @@ type UpsertHouseUserParams struct {
 type InsertEventParams struct {
 	ExtGroupID  string
 	ExtUserID   string
-	Kind        EventKind
 	Category    *string
-	Minutes     *int
-	AmountYen   *int
 	Points      float64
 	SourceMsgID *string
 	Now         time.Time
@@ -96,10 +92,10 @@ RETURNING id
 	}
 
 	result, err := tx.ExecContext(ctx, `
-INSERT INTO events(house_id,user_id,kind,category_id,minutes,amount_yen,points,source_msg_id,created_at,note)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+INSERT INTO events(house_id,user_id,kind,category_id,points,source_msg_id,created_at,note)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 ON CONFLICT(house_id, source_msg_id) DO NOTHING
-`, houseID, userID, p.Kind, catID, p.Minutes, p.AmountYen, p.Points, p.SourceMsgID, p.Now, p.Note)
+`, houseID, userID, KindChore, catID, p.Points, p.SourceMsgID, p.Now, p.Note)
 	if err != nil {
 		return err
 	}

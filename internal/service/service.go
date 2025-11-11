@@ -25,6 +25,7 @@ func nowJST() time.Time {
 }
 
 type Service struct{ rp *repo.Repo }
+
 func New(rp *repo.Repo) *Service { return &Service{rp: rp} }
 
 // normalizeCategory カテゴリ名を正規化（全角/半角・NFKC・trim・連続空白圧縮）
@@ -38,55 +39,47 @@ func normalizeCategory(s string) string {
 }
 
 type ReportPayload struct {
-	GroupID     string  `json:"group_id"`          // ext_group_id
-	UserID      string  `json:"user_id"`           // ext_user_id
-	Type        string  `json:"type"`              // "chore" or "purchase"
-	Category    *string `json:"category,omitempty"`
-	Minutes     *int    `json:"minutes,omitempty"` // when chore
-	AmountYen   *int    `json:"amount_yen,omitempty"`
+	GroupID     string  `json:"group_id"` // ext_group_id
+	UserID      string  `json:"user_id"`  // ext_user_id
+	Task        string  `json:"task"`
+	Option      *string `json:"option,omitempty"`
+	Type        *string `json:"type,omitempty"`
 	SourceMsgID *string `json:"source_msg_id,omitempty"`
 	Note        *string `json:"note,omitempty"`
 }
 
 func (s *Service) Report(ctx context.Context, p ReportPayload) error {
-	if p.GroupID == "" || p.UserID == "" || p.Type == "" {
+	if p.GroupID == "" || p.UserID == "" {
 		return errors.New("missing required fields")
 	}
 	if p.SourceMsgID == nil || *p.SourceMsgID == "" {
 		return errors.New("source_msg_id is required for idempotency")
 	}
+	if p.Type != nil && *p.Type != "" && *p.Type != string(repo.KindChore) {
+		return errors.New("type must be 'chore' when provided")
+	}
+	if strings.TrimSpace(p.Task) == "" {
+		return errors.New("task is required")
+	}
 	now := nowJST()
 
-	var points float64
-	switch p.Type {
-	case string(repo.KindChore):
-		if p.Minutes == nil || *p.Minutes <= 0 {
-			return errors.New("minutes required (>0)")
-		}
-		wt := 1.0
-		if p.Category != nil {
-			normalized := normalizeCategory(*p.Category)
-			p.Category = &normalized
-			w, _ := s.rp.CategoryWeight(ctx, p.GroupID, normalized)
-			wt = w
-		}
-		points = float64(*p.Minutes) * wt
-	case string(repo.KindPurchase):
-		if p.AmountYen == nil || *p.AmountYen <= 0 {
-			return errors.New("amount_yen required (>0)")
-		}
-		points = float64(*p.AmountYen) / 10.0 // 仮ルール：10円=1pt
-	default:
-		return errors.New("invalid type")
+	def, err := resolveTask(strings.TrimSpace(p.Task))
+	if err != nil {
+		return err
 	}
+	canonical := normalizeCategory(def.Key)
+
+	wt := 1.0
+	w, _ := s.rp.CategoryWeight(ctx, p.GroupID, canonical)
+	if w > 0 {
+		wt = w
+	}
+	points := def.Points * wt
 
 	return s.rp.InsertEvent(ctx, repo.InsertEventParams{
 		ExtGroupID:  p.GroupID,
 		ExtUserID:   p.UserID,
-		Kind:        repo.EventKind(p.Type),
-		Category:    p.Category,
-		Minutes:     p.Minutes,
-		AmountYen:   p.AmountYen,
+		Category:    &canonical,
 		Points:      points,
 		SourceMsgID: p.SourceMsgID,
 		Now:         now,
@@ -95,7 +88,7 @@ func (s *Service) Report(ctx context.Context, p ReportPayload) error {
 }
 
 func (s *Service) Rp() *repo.Repo {
-  return s.rp
+	return s.rp
 }
 
 func (s *Service) UpsertCategory(ctx context.Context, group, name string, weight float64) error {
