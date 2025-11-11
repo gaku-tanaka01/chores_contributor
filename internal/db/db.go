@@ -10,24 +10,27 @@ import (
 )
 
 func Connect(dsn string) (*pgxpool.Pool, error) {
-	// sslmode=require を強制（Render/Supabase用）
+	// sslmode=require を強制（Supabase/Render用）
+	// SupabaseではSSL接続が必須のため、未指定またはdisableの場合はrequireに上書き
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err
 	}
 	q := u.Query()
-	if q.Get("sslmode") == "" {
+	currentMode := strings.ToLower(q.Get("sslmode"))
+	
+	// Render環境または本番環境では常にrequireを強制
+	// ローカル開発環境でもSupabaseを使う場合はrequireが必要
+	if os.Getenv("RENDER") != "" || os.Getenv("ENV") == "production" {
 		q.Set("sslmode", "require")
-		u.RawQuery = q.Encode()
-		dsn = u.String()
-	} else if !strings.Contains(strings.ToLower(q.Get("sslmode")), "require") && !strings.Contains(strings.ToLower(q.Get("sslmode")), "verify") {
-		// 本番環境では require または verify を強制
-		if os.Getenv("ENV") == "production" || os.Getenv("RENDER") != "" {
-			q.Set("sslmode", "require")
-			u.RawQuery = q.Encode()
-			dsn = u.String()
-		}
+	} else if currentMode == "" || currentMode == "disable" || currentMode == "allow" {
+		// 未指定または非セキュアな設定の場合はrequireに設定
+		q.Set("sslmode", "require")
 	}
+	// verify-fullやverify-caはそのまま使用（より安全）
+
+	u.RawQuery = q.Encode()
+	dsn = u.String()
 
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
