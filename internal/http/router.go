@@ -103,6 +103,17 @@ func Router(sv *service.Service) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	// ルートパス: ブラウザアクセス時の404を防ぐ
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("chores-contributor API is running"))
+	})
+
+	// favicon: ログを静かにする
+	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	// ヘルスチェック: 無条件で200を返す（起動直後でも確実に通す）
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
