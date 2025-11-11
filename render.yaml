@@ -4,17 +4,14 @@ services:
     runtime: go
     plan: free
     region: singapore
-    # ← どちらか片方でOK。両方書いても害はない
-    rootDir: .                         # 1) ルートを明示
-    buildCommand: |                    # 2) 念のため確実にcdしてからbuild
-      cd $RENDER_PROJECT_ROOT
-      go build -o app ./cmd/server
+    rootDir: .                     # リポジトリ直下（サブディレクトリなら相対パス）
+    buildCommand: go build -o app ./cmd/server
     startCommand: ./app
     healthCheckPath: /healthz
     envVars:
       - key: GOTOOLCHAIN
-        value: auto                    # go1.25.4 を自動取得
-      - key: DATABASE_URL              # 例: postgres://.../postgres?sslmode=require
+        value: auto                # go1.25.4 を自動取得
+      - key: DATABASE_URL          # 例: postgres://.../postgres?sslmode=require
         sync: false
       - key: ADMIN_TOKEN
         sync: false
