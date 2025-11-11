@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: chores-contributor-server-sg
+    name: chores-contributor-server3
     runtime: go
     plan: free
     region: singapore
