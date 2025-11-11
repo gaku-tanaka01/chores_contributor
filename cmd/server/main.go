@@ -62,13 +62,10 @@ func main() {
 	if dsn == "" {
 		log.Fatal("DATABASE_URL is required")
 	}
-	pool, err := db.Connect(context.Background(), dsn)
-	if err != nil {
-		log.Fatalf("database connection failed: %v (dsn=%s)", err, db.MaskDSN(dsn))
-	}
-	defer pool.Close()
+	sqlDB := db.OpenIPv4DB(dsn)
+	defer sqlDB.Close()
 
-	rp := repo.New(pool)
+	rp := repo.New(sqlDB)
 	sv := service.New(rp)
 
 	r := httpapi.Router(sv)
