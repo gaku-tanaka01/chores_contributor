@@ -39,10 +39,12 @@ func OpenIPv4DB(dsn string) *sql.DB {
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
+	backoff := time.Second
 	for {
-		if err := db.PingContext(ctx); err == nil {
+		err := db.PingContext(ctx)
+		if err == nil {
 			log.Printf("db ping ok (IPv4 forced)")
 			break
 		}
@@ -50,7 +52,14 @@ func OpenIPv4DB(dsn string) *sql.DB {
 		case <-ctx.Done():
 			log.Fatalf("db ping failed (IPv4): %v", ctx.Err())
 		default:
-			time.Sleep(1 * time.Second)
+			log.Printf("db ping retry in %s: %v", backoff, err)
+			time.Sleep(backoff)
+			if backoff < 5*time.Second {
+				backoff *= 2
+				if backoff > 5*time.Second {
+					backoff = 5 * time.Second
+				}
+			}
 		}
 	}
 	return db
