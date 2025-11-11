@@ -124,8 +124,8 @@ func Router(sv *service.Service) http.Handler {
 		ctx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
 		defer cancel()
 		if err := sv.Rp().Ping(ctx); err != nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("db not ready"))
+			log.Printf("readyz ping failed: %v", err)
+			http.Error(w, "db not ready: "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -150,7 +150,7 @@ func Router(sv *service.Service) http.Handler {
 
 		var payload struct {
 			Events []struct {
-				Type string `json:"type"`
+				Type   string `json:"type"`
 				Source struct {
 					GroupID string `json:"groupId"`
 					UserID  string `json:"userId"`
@@ -241,18 +241,22 @@ func Router(sv *service.Service) http.Handler {
 				ref = t
 			}
 		}
-		wd := int(ref.Weekday()); if wd == 0 { wd = 7 }
-		start := time.Date(ref.Year(), ref.Month(), ref.Day(), 0,0,0,0, ref.Location()).AddDate(0,0,-(wd-1))
-		end   := start.AddDate(0,0,7)
+		wd := int(ref.Weekday())
+		if wd == 0 {
+			wd = 7
+		}
+		start := time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, ref.Location()).AddDate(0, 0, -(wd - 1))
+		end := start.AddDate(0, 0, 7)
 
 		rows, err := sv.Rp().WeeklyPoints(r.Context(), group, start, end)
 		if err != nil {
-			http.Error(w, "query error", 500); return
+			http.Error(w, "query error", 500)
+			return
 		}
 		out := struct {
-			Start string                    `json:"start"`
-			End   string                    `json:"end"`
-			Rows  []map[string]interface{}  `json:"rows"`
+			Start string                   `json:"start"`
+			End   string                   `json:"end"`
+			Rows  []map[string]interface{} `json:"rows"`
 		}{
 			Start: start.Format("2006-01-02"),
 			End:   end.Format("2006-01-02"),
@@ -260,12 +264,12 @@ func Router(sv *service.Service) http.Handler {
 		}
 		for i, x := range rows {
 			out.Rows = append(out.Rows, map[string]interface{}{
-				"rank":   i+1,
+				"rank":   i + 1,
 				"name":   x.Name,
 				"points": x.Points,
 			})
 		}
-		w.Header().Set("Content-Type","application/json")
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	})
 

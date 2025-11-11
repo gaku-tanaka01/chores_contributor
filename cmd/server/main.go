@@ -29,7 +29,7 @@ func init() {
 		// ローカル開発環境: プロジェクトルートの.env.local
 		envPath = ".env.local"
 	}
-	
+
 	err := godotenv.Load(envPath)
 	if err != nil {
 		log.Fatalf("Error loading .env file from %s: %v", envPath, err)
@@ -62,9 +62,9 @@ func main() {
 	if dsn == "" {
 		log.Fatal("DATABASE_URL is required")
 	}
-	pool, err := db.Connect(dsn)
+	pool, err := db.Connect(context.Background(), dsn)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("database connection failed: %v (dsn=%s)", err, db.MaskDSN(dsn))
 	}
 	defer pool.Close()
 
