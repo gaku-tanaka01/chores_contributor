@@ -20,19 +20,18 @@ chores_contributor/
 ## ✅ 実装済み項目
 
 ### 1. コア機能
-- ✅ 家事/購入報告API (`POST /events/report`)
+- ✅ 家事報告API (`POST /events/report`)
 - ✅ 週次集計API (`GET /houses/{group}/weekly`)
-- ✅ カテゴリ重み編集API (`PUT /admin/houses/{group}/categories/{name}`)
+- ✅ ハードコードされたタスク辞書によるポイント計算
 - ✅ LINE Webhook (`POST /webhook`)
 - ✅ ヘルスチェック (`GET /healthz`)
 - ✅ メトリクスエンドポイント (`GET /debug/vars`)
 
 ### 2. 堅牢性
 - ✅ 冪等性保証（`source_msg_id`必須、DB制約）
-- ✅ センチネルエラー（`ErrHouseNotFound`, `ErrDuplicateEvent`）
+- ✅ センチネルエラー（`ErrDuplicateEvent`）
 - ✅ 入力検証（`DisallowUnknownFields`, Content-Typeガード）
-- ✅ カテゴリ正規化（アプリ側 + DB側）
-- ✅ 管理API認可（`X-Admin-Token`）
+- ✅ タスクキーの正規化（アプリ側でNFKC + trim）
 - ✅ 重複検知と明確なレスポンス
 
 ### 3. 運用機能
@@ -77,16 +76,16 @@ chores_contributor/
 
 ### オプション
 - `PORT`: サーバーポート（デフォルト: 8080）
-- `ADMIN_TOKEN`: 管理API用トークン（未設定時は500エラー）
 - `LINE_CHANNEL_SECRET`: LINE Webhook署名検証用（未設定時は403エラー）
+- `LINE_CHANNEL_ID`: LINE返信API呼び出し用トークン（返信が不要なら未設定でも可）
 
 ## 🚀 起動手順（想定）
 
 ```bash
 # 1. 環境変数設定
 export DATABASE_URL="postgres://app:app@localhost:5432/chores?sslmode=disable"
-export ADMIN_TOKEN="your-secret-token"
 export LINE_CHANNEL_SECRET="your-line-secret"  # LINE使用時のみ
+export LINE_CHANNEL_ID="your-line-token"   # LINE返信を有効にする場合
 export PORT=8081  # オプション
 
 # 2. DB起動・マイグレーション
@@ -101,8 +100,8 @@ go run ./cmd/server
 
 ### 起動前チェック
 - [ ] `DATABASE_URL`が設定されている
-- [ ] `ADMIN_TOKEN`が設定されている（管理API使用時）
 - [ ] `LINE_CHANNEL_SECRET`が設定されている（LINE Webhook使用時）
+- [ ] `LINE_CHANNEL_ID`が設定されている（LINE返信機能を使う場合）
 - [ ] DBが起動している
 - [ ] マイグレーションが適用済み
 
@@ -124,12 +123,9 @@ go run ./cmd/server
 - ✅ `idx_events_house_created_at`: 週次集計用
 - ✅ `idx_events_house_source`: 冪等性チェック用
 - ✅ `idx_events_house_created_cover`: カバリングインデックス（週次集計最適化）
-- ✅ `idx_categories_house_name`: カテゴリ検索用
-- ✅ `idx_memberships_house_user`: メンバーシップ検索用
 
 ### DB制約
 - ✅ `events.source_msg_id`: NOT NULL + 長さ制限（1-64文字）
-- ✅ `categories.normalized_name`: UNIQUE制約（DB側正規化）
 
 ## 🐛 既知の制限事項
 
@@ -161,8 +157,8 @@ go run ./cmd/server
 ### 運用開始前の最終チェックリスト
 
 - [ ] `DATABASE_URL`環境変数を設定
-- [ ] `ADMIN_TOKEN`環境変数を設定（管理API使用時）
 - [ ] `LINE_CHANNEL_SECRET`環境変数を設定（LINE Webhook使用時）
+- [ ] `LINE_CHANNEL_ID`環境変数を設定（LINE返信使用時）
 - [ ] DBを起動（`docker-compose up -d db`）
 - [ ] マイグレーションを実行（`make migrate-up`）
 - [ ] サーバーを起動（`go run ./cmd/server`）

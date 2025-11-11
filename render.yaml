@@ -13,7 +13,7 @@ services:
         value: auto                # go1.25.4 を自動取得
       - key: DATABASE_URL          # 例: postgres://.../postgres?sslmode=require
         sync: false
-      - key: ADMIN_TOKEN
-        sync: false
       - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ID
         sync: false

@@ -76,44 +76,6 @@ paths:
                         points:
                           type: number
 
-  /admin/houses/{group}/categories/{name}:
-    put:
-      summary: カテゴリ重みの編集（管理者用）
-      parameters:
-        - name: group
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
-      security:
-        - AdminToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [weight]
-              properties:
-                weight:
-                  type: number
-                  minimum: 0
-                  exclusiveMinimum: true
-      responses:
-        "204":
-          description: updated
-        "400":
-          description: bad request
-        "403":
-          description: forbidden
-        "404":
-          description: house not found
-
   /healthz:
     get:
       summary: ヘルスチェック
@@ -155,10 +117,4 @@ components:
       properties:
         error:
           type: string
-
-  securitySchemes:
-    AdminToken:
-      type: apiKey
-      in: header
-      name: X-Admin-Token
 

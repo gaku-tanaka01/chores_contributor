@@ -161,22 +161,54 @@ func min(vals ...int) int {
 	return m
 }
 
+const BASE_POINT = 100
+
 func defaultTaskDefinitions() []TaskDefinition {
 	return []TaskDefinition{
 		{
 			Key:     "皿洗い",
-			Aliases: []string{"さらあらい", "dish", "dishwashing", "洗い物", "洗いもの"},
-			Points:  1,
-		},
-		{
-			Key:     "掃除",
-			Aliases: []string{"そうじ", "掃除機", "clean", "cleaning"},
-			Points:  1,
+			Aliases: []string{"さらあらい", "皿洗い", "洗い物", "洗いもの"},
+			Points:  BASE_POINT * 3,
 		},
 		{
 			Key:     "洗濯",
-			Aliases: []string{"せんたく", "laundry", "洗濯物"},
-			Points:  1,
+			Aliases: []string{"せんたく", "洗濯", "洗濯物", "せんたくもの", "せんたく物"},
+			Points:  BASE_POINT,
+		},
+		{
+			Key:     "ゴミ出し",
+			Aliases: []string{"ごみだし", "ゴミ出し", "ゴミ", "ごみ"},
+			Points:  BASE_POINT * 1.5,
+		},
+		{
+			Key:     "買い出し",
+			Aliases: []string{"買出し", "買い出し", "買い物", "買いもの", "かいもの"},
+			Points:  BASE_POINT * 4,
+		},
+		{
+			Key:     "風呂掃除",
+			Aliases: []string{"ふろそうじ", "風呂掃除", "風呂清掃", "風呂", "ふろ"},
+			Points:  BASE_POINT * 1.5,
+		},
+		{
+			Key:     "トイレ掃除",
+			Aliases: []string{"トイレそうじ", "トイレ掃除", "トイレ清掃", "トイレ", "といれそうじ", "といれ"},
+			Points:  BASE_POINT * 4,
+		},
+		{
+			Key:     "床掃除",
+			Aliases: []string{"ゆかそうじ", "床掃除", "床清掃", "床", "ゆか"},
+			Points:  BASE_POINT * 3,
+		},
+		{
+			Key:     "洗面台掃除",
+			Aliases: []string{"洗面台掃除", "洗面台清掃", "せんめんだい", "せんめんだいそうじ", "洗面台"},
+			Points:  BASE_POINT * 3,
+		},
+		{
+			Key:     "風呂排水溝",
+			Aliases: []string{"風呂の排水溝", "排水溝風呂", "風呂排水溝", "風呂の排水溝"},
+			Points:  BASE_POINT * 3,
 		},
 	}
 }

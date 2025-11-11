@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -8,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"expvar"
+	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -32,9 +35,10 @@ type lineWebhookPayload struct {
 }
 
 type lineEvent struct {
-	Type    string      `json:"type"`
-	Source  lineSource  `json:"source"`
-	Message lineMessage `json:"message"`
+	Type       string      `json:"type"`
+	ReplyToken string      `json:"replyToken"`
+	Source     lineSource  `json:"source"`
+	Message    lineMessage `json:"message"`
 }
 
 type lineSource struct {
@@ -58,26 +62,70 @@ type lineMention struct {
 	} `json:"mentionees"`
 }
 
+type lineReplyMessage struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type lineReplyRequest struct {
+	ReplyToken string             `json:"replyToken"`
+	Messages   []lineReplyMessage `json:"messages"`
+}
+
+const lineReplyEndpoint = "https://api.line.me/v2/bot/message/reply"
+
+func sendLineReply(ctx context.Context, replyToken string, texts ...string) error {
+	if replyToken == "" {
+		return errors.New("empty reply token")
+	}
+	token := os.Getenv("LINE_CHANNEL_ID")
+	if token == "" {
+		return errors.New("LINE_CHANNEL_ID not set")
+	}
+
+	msgs := make([]lineReplyMessage, 0, len(texts))
+	for _, t := range texts {
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		r := []rune(t)
+		if len(r) > 1000 {
+			r = r[:1000]
+		}
+		msgs = append(msgs, lineReplyMessage{Type: "text", Text: string(r)})
+	}
+	if len(msgs) == 0 {
+		return nil
+	}
+
+	payload, err := json.Marshal(lineReplyRequest{ReplyToken: replyToken, Messages: msgs})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, lineReplyEndpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("line reply failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(errResp{Error: msg})
-}
-
-func requireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get("X-Admin-Token")
-		expected := os.Getenv("ADMIN_TOKEN")
-		if expected == "" {
-			writeErr(w, 500, "server misconfigured")
-			return
-		}
-		if token != expected {
-			writeErr(w, 403, "forbidden")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // verifyLINE LINE署名を検証（HMAC-SHA256）
@@ -119,16 +167,59 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 		return
 	}
 
+	groupID := e.Source.GroupID
+	if groupID == "" {
+		if e.Source.RoomID != "" {
+			groupID = e.Source.RoomID
+		} else {
+			groupID = e.Source.UserID
+		}
+	}
+
 	cmd := strings.ToLower(fields[0])
 	switch cmd {
 	case "me":
-		handleLineCommandMe(ctx, sv, e)
+		summary, err := sv.WeeklyUserSummary(ctx, groupID, e.Source.UserID, time.Now())
+		if err != nil {
+			if replyErr := sendLineReply(ctx, e.ReplyToken, "取得失敗: 少し待ってから試してね"); replyErr != nil {
+				log.Printf("LINE reply error (me command failure): %v", replyErr)
+			}
+			log.Printf("LINE summary error: group=%s user=%s error=%v", groupID, e.Source.UserID, err)
+			return
+		}
+		if len(summary.TaskList) == 0 {
+			if err := sendLineReply(ctx, e.ReplyToken, "今週のポイントはまだ0ptだよ。"); err != nil {
+				log.Printf("LINE reply error (me command zero): %v", err)
+			}
+			return
+		}
+		breakdown := make([]string, 0, len(summary.TaskList))
+		for _, item := range summary.TaskList {
+			breakdown = append(breakdown, fmt.Sprintf("%s:%s", item.TaskKey, formatPoints(item.Points)))
+		}
+		msg := fmt.Sprintf("今週:%s (%s)", formatPoints(summary.Total), strings.Join(breakdown, ", "))
+		if err := sendLineReply(ctx, e.ReplyToken, msg); err != nil {
+			log.Printf("LINE reply error (me command): %v", err)
+		}
 		return
 	case "top":
-		handleLineCommandTop(ctx, sv, e)
+		reply := "今週のランキング表示は準備中だよ。もう少し待ってて！"
+		if err := sendLineReply(ctx, e.ReplyToken, reply); err != nil {
+			log.Printf("LINE reply error (top command): %v", err)
+		}
 		return
 	case "help":
-		handleLineCommandHelp(ctx, sv, e)
+		helpText := strings.Join([]string{
+			"使い方:",
+			"・@bot 皿洗い → 家事報告",
+			"・@bot me → 今週の自分のポイント",
+			"・@bot top → 今週のTOP3 (準備中)",
+			"・@bot help → このメッセージ",
+			"タスク名はかな/英語/タイプミス1文字まで自動補正するよ。",
+		}, "\n")
+		if err := sendLineReply(ctx, e.ReplyToken, helpText); err != nil {
+			log.Printf("LINE reply error (help command): %v", err)
+		}
 		return
 	}
 
@@ -137,15 +228,6 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 	if len(fields) > 1 {
 		opt := fields[1]
 		option = &opt
-	}
-
-	groupID := e.Source.GroupID
-	if groupID == "" {
-		if e.Source.RoomID != "" {
-			groupID = e.Source.RoomID
-		} else {
-			groupID = e.Source.UserID
-		}
 	}
 
 	payload := service.ReportPayload{
@@ -157,35 +239,31 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 	}
 
 	if err := sv.Report(ctx, payload); err != nil {
-		// エラーログ出力（goroutine内なので標準ログを使用）
-		log.Printf("LINE webhook error: group=%s user=%s msg_id=%s error=%v",
-			groupID, e.Source.UserID, e.Message.ID, err)
+		var amb *service.TaskAmbiguousError
+		var msg string
+		switch {
+		case errors.Is(err, repo.ErrDuplicateEvent):
+			msg = "重複: この報告は登録済みだよ"
+		case errors.Is(err, service.ErrTaskNotFound):
+			msg = fmt.Sprintf("不明: \"%s\"", task)
+		case errors.As(err, &amb):
+			msg = fmt.Sprintf("不明: \"%s\" 候補: %s", task, strings.Join(amb.Candidates, "/"))
+		default:
+			log.Printf("LINE webhook error: group=%s user=%s msg_id=%s error=%v", groupID, e.Source.UserID, e.Message.ID, err)
+			msg = "失敗: 少し待ってから試してね"
+		}
+		if replyErr := sendLineReply(ctx, e.ReplyToken, msg); replyErr != nil {
+			log.Printf("LINE reply error (failure notice): %v", replyErr)
+		}
 		return
 	}
 }
 
-func handleLineCommandMe(ctx context.Context, sv *service.Service, e lineEvent) {
-	groupID := e.Source.GroupID
-	if groupID == "" {
-		groupID = e.Source.UserID
+func formatPoints(pt float64) string {
+	if math.Abs(pt-math.Round(pt)) < 1e-6 {
+		return fmt.Sprintf("%.0fpt", math.Round(pt))
 	}
-	log.Printf("LINE command @bot me received: group=%s user=%s", groupID, e.Source.UserID)
-}
-
-func handleLineCommandTop(ctx context.Context, sv *service.Service, e lineEvent) {
-	groupID := e.Source.GroupID
-	if groupID == "" {
-		groupID = e.Source.UserID
-	}
-	log.Printf("LINE command @bot top received: group=%s user=%s", groupID, e.Source.UserID)
-}
-
-func handleLineCommandHelp(ctx context.Context, sv *service.Service, e lineEvent) {
-	groupID := e.Source.GroupID
-	if groupID == "" {
-		groupID = e.Source.UserID
-	}
-	log.Printf("LINE command @bot help received: group=%s user=%s", groupID, e.Source.UserID)
+	return fmt.Sprintf("%.1fpt", pt)
 }
 
 func Router(sv *service.Service) http.Handler {
@@ -346,43 +424,6 @@ func Router(sv *service.Service) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	})
-
-	// カテゴリ重みの編集（管理者用）
-	// PUT /admin/houses/{group}/categories/{name}
-	// { "weight": 1.5 }
-	admin := chi.NewRouter()
-	admin.Use(requireAdmin)
-	admin.Put("/houses/{group}/categories/{name}", func(w http.ResponseWriter, r *http.Request) {
-		group := chi.URLParam(r, "group")
-		name := chi.URLParam(r, "name")
-		if group == "" || name == "" {
-			writeErr(w, 400, "group and name are required")
-			return
-		}
-		var body struct {
-			Weight float64 `json:"weight"`
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&body); err != nil {
-			writeErr(w, 400, "invalid json: "+err.Error())
-			return
-		}
-		if body.Weight <= 0 {
-			writeErr(w, 400, "weight must be greater than 0")
-			return
-		}
-		if err := sv.UpsertCategory(r.Context(), group, name, body.Weight); err != nil {
-			if errors.Is(err, repo.ErrHouseNotFound) {
-				writeErr(w, 404, "house not found")
-				return
-			}
-			writeErr(w, 500, "update failed: "+err.Error())
-			return
-		}
-		w.WriteHeader(204)
-	})
-	r.Mount("/admin", admin)
 
 	return r
 }

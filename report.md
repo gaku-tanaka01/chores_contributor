@@ -28,10 +28,10 @@
 
 ```95:107:internal/repo/repo.go
 	result, err := tx.ExecContext(ctx, `
-INSERT INTO events(house_id,user_id,kind,category_id,points,source_msg_id,created_at,note)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+INSERT INTO events(house_id,user_id,kind,task_key,task_option,points,source_msg_id,created_at,note)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
 ON CONFLICT(house_id, source_msg_id) DO NOTHING
-`, houseID, userID, KindChore, catID, p.Points, p.SourceMsgID, p.Now, p.Note)
+`, houseID, userID, KindChore, p.TaskKey, p.TaskOption, p.Points, p.SourceMsgID, p.Now, p.Note)
 	if err != nil {
 		return err
 	}
@@ -49,97 +49,6 @@ ON CONFLICT(house_id, source_msg_id) DO NOTHING
 - **報告単位の精度**: 各報告（イベント）を`source_msg_id`で一意に識別
 - **クライアント責任**: クライアント側で一意のIDを生成・管理することを前提
 - **自動重複防止**: DB制約により、サーバー側で自動的に重複を排除
-
-### 2. 重み更新APIの堅牢化
-
-#### 2.1 バリデーション強化
-
-**実装箇所**: `internal/http/router.go`
-
-```121:140:internal/http/router.go
-	admin.Put("/houses/{group}/categories/{name}", func(w http.ResponseWriter, r *http.Request) {
-		group := chi.URLParam(r, "group")
-		name := chi.URLParam(r, "name")
-		if group == "" || name == "" {
-			writeErr(w, 400, "group and name are required")
-			return
-		}
-		var body struct {
-			Weight float64 `json:"weight"`
-		}
-		dec := json.NewDecoder(r.Body)
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&body); err != nil {
-			writeErr(w, 400, "invalid json: "+err.Error())
-			return
-		}
-		if body.Weight <= 0 {
-			writeErr(w, 400, "weight must be greater than 0")
-			return
-		}
-```
-
-**改善点**:
-- URLパラメータの空チェックを追加
-- `DisallowUnknownFields()`により、未知フィールドを拒否（typo検知）
-- JSONデコードエラーを個別に処理（より明確なエラーメッセージ）
-- `weight`が0より大きいことを明示的にチェック
-
-#### 2.2 エラーハンドリングの改善
-
-**実装箇所**: `internal/http/router.go`
-
-```141:149:internal/http/router.go
-		if err := sv.UpsertCategory(r.Context(), group, name, body.Weight); err != nil {
-			if errors.Is(err, repo.ErrHouseNotFound) {
-				writeErr(w, 404, "house not found")
-				return
-			}
-			writeErr(w, 500, "update failed: "+err.Error())
-			return
-		}
-		w.WriteHeader(204)
-	})
-```
-
-**改善点**:
-- センチネルエラー（`repo.ErrHouseNotFound`）を使用してエラー判定
-- houseが存在しない場合は404を返す（適切なHTTPステータスコード）
-- その他のエラーは詳細メッセージを含む500を返す
-- クライアント側でエラーの種類を判別可能
-
-#### 2.3 リポジトリ層の改善
-
-**実装箇所**: `internal/repo/repo.go`
-
-```141:160:internal/repo/repo.go
-func (r *Repo) UpsertCategory(ctx context.Context, extGroupID, name string, weight float64) error {
-	// まずhouseが存在するか確認
-	var houseID int64
-	err := r.db.QueryRow(ctx, `
-SELECT id FROM houses WHERE ext_group_id=$1
-`, extGroupID).Scan(&houseID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrHouseNotFound
-		}
-		return err
-	}
-
-	// カテゴリを更新/作成
-	_, err = r.db.Exec(ctx, `
-INSERT INTO categories(house_id,name,weight)
-VALUES($1,$2,$3)
-ON CONFLICT(house_id,name) DO UPDATE SET weight=EXCLUDED.weight
-`, houseID, name, weight)
-	return err
-}
-```
-
-**改善点**:
-- houseの存在確認を先に行う（2段階チェック）
-- `pgx.ErrNoRows`をセンチネルエラーに変換
-- `ON CONFLICT`により、既存カテゴリの重み更新と新規作成を統一的に処理
 
 ### 3. daily_cap_minutesロジックの削除
 
@@ -183,26 +92,30 @@ ON CONFLICT(house_id,name) DO UPDATE SET weight=EXCLUDED.weight
 
 **実装**: `internal/repo/repo.go`
 
-```15:18:internal/repo/repo.go
+```18:20:internal/repo/repo.go
 var (
-	ErrHouseNotFound   = errors.New("house not found")
-	ErrDuplicateEvent  = errors.New("duplicate event")
+	ErrDuplicateEvent = errors.New("duplicate event")
 )
 ```
 
-```147:152:internal/repo/repo.go
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrHouseNotFound
-		}
-		return err
-	}
+```80:90:internal/repo/repo.go
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO events(house_id,user_id,kind,task_key,task_option,points,source_msg_id,created_at,note)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+ON CONFLICT(house_id, source_msg_id) DO NOTHING
+`, houseID, userID, KindChore, p.TaskKey, p.TaskOption, p.Points, p.SourceMsgID, p.Now, p.Note)
+if err != nil {
+	return err
+}
+if rows, _ := result.RowsAffected(); rows == 0 {
+	return ErrDuplicateEvent
+}
 ```
 
 **効果**:
-- `errors.Is()`による型安全なエラー判定
+- `errors.Is()`による型安全な重複判定
 - エラーメッセージの変更に影響されない
-- テストでのモックが容易
+- テストでの冪等性検証が容易
 
 ### 3. 入力の"取りこぼし"を潰す（typo検知）
 
@@ -223,14 +136,14 @@ var (
 - クライアント側のtypoを早期発見
 - API仕様との整合性を保証
 
-### 4. Unicode/表記ゆれで重みが割れる問題の解決
+### 4. Unicode/表記ゆれでタスクが分裂する問題の解決
 
-**問題**: カテゴリ名が「皿洗い」「皿洗い 」「さらあらい」「皿 洗 い」などで別カテゴリ化する。
+**問題**: タスク名が「皿洗い」「皿洗い 」「さらあらい」「皿 洗 い」などで別タスクとして扱われてしまう。
 
 **実装**: `internal/service/service.go`
 
 ```17:25:internal/service/service.go
-// normalizeCategory カテゴリ名を正規化（全角/半角・NFKC・trim・連続空白圧縮）
+// normalizeCategory タスク名を正規化（全角/半角・NFKC・trim・連続空白圧縮）
 func normalizeCategory(s string) string {
 	s = strings.TrimSpace(s)
 	// 連続空白を単一スペースに圧縮
@@ -241,63 +154,23 @@ func normalizeCategory(s string) string {
 }
 ```
 
-```60:75:internal/service/service.go
+```60:74:internal/service/service.go
 	def, err := resolveTask(strings.TrimSpace(p.Task))
 	if err != nil {
 		return err
 	}
 	canonical := normalizeCategory(def.Key)
 
-	wt := 1.0
-	w, _ := s.rp.CategoryWeight(ctx, p.GroupID, canonical)
-	if w > 0 {
-		wt = w
-	}
-	points := def.Points * wt
+	points := def.Points
 ```
 
 **効果**:
 - 前後スペースのtrim
 - 連続スペースの圧縮
 - Unicode正規化（NFKC）による互換等価文字の統合
-- `Report`と`UpsertCategory`の両方で自動適用
+- タスク辞書とイベント保存でキーを統一
 
-### 5. 認可ゼロは危険（管理APIの保護）
-
-**問題**: 管理API（重み更新）が誰でも叩ける状態。
-
-**実装**: `internal/http/router.go`
-
-```27:36:internal/http/router.go
-func requireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get("X-Admin-Token")
-		expected := os.Getenv("ADMIN_TOKEN")
-		if expected == "" || token != expected {
-			writeErr(w, 403, "forbidden")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-```
-
-```119:151:internal/http/router.go
-	admin := chi.NewRouter()
-	admin.Use(requireAdmin)
-	admin.Put("/houses/{group}/categories/{name}", func(w http.ResponseWriter, r *http.Request) {
-		// ... 実装 ...
-	})
-	r.Mount("/admin", admin)
-```
-
-**効果**:
-- `/admin`パス配下を保護
-- `X-Admin-Token`ヘッダーによる認証
-- 環境変数`ADMIN_TOKEN`で管理
-- 甘いが無いより遥かに安全
-
-### 6. 競合条件と重複検知の改善
+### 5. 競合条件と重複検知の改善
 
 **問題**: 重複発生時の通知が無いと「記録された気になって実はスキップ」が起きる。
 
@@ -331,6 +204,44 @@ ON CONFLICT(house_id, source_msg_id) DO NOTHING
 - `RowsAffected()`で重複を検知
 - HTTP 200で`{"status":"duplicate"}`を返す
 - クライアント側で重複を認識可能
+
+### 6. LINE返信の実装
+
+**問題**: これまではLINE経由の報告結果がログにしか残らず、ユーザーへのフィードバックがなかった。
+
+**実装**: `internal/http/router.go`
+
+```68:118:internal/http/router.go
+const lineReplyEndpoint = "https://api.line.me/v2/bot/message/reply"
+
+func sendLineReply(ctx context.Context, replyToken string, texts ...string) error {
+    // ... 省略 ...
+}
+```
+
+- `LINE_CHANNEL_ID`を用いてLINE Messaging APIのReplyエンドポイントへPOST
+- 返信メッセージは1,000文字でサニタイズし、空文字は送信しない
+- エラー時は本文を読み込みログへ記録
+
+```120:206:internal/http/router.go
+switch cmd {
+case "me":
+    sendLineReply(...)
+case "top":
+    sendLineReply(...)
+case "help":
+    sendLineReply(...)
+default:
+    if err := sv.Report(...); err != nil {
+        // 各種エラー別に返信
+    }
+    sendLineReply(...)
+}
+```
+
+- コマンドに応じた定型文（`me/top/help`）を返信
+- 通常の家事報告は成功/失敗に応じてメッセージを返却
+- `ErrDuplicateEvent`や`TaskAmbiguousError`などのエラー内容をユーザーに伝達
 
 ### 7. カバリングインデックス
 
@@ -422,10 +333,9 @@ func TestNormalizeCategory(t *testing.T) {
 
 3. **入力検証の強化**
    - `DisallowUnknownFields()`によるtypo検知
-   - カテゴリ正規化による表記ゆれの解消
+   - タスクキーの正規化による表記ゆれの解消
 
 4. **セキュリティ**
-   - 管理APIの認可保護
    - 環境変数による設定管理
 
 5. **運用性**
@@ -441,7 +351,7 @@ func TestNormalizeCategory(t *testing.T) {
 
 ### 今後の改善点
 
-- カテゴリ正規化のDB側実装（generated column + UNIQUE制約）
-- purchaseポイント係数の外出し（`house_settings.yen_per_point`の活用）
+- タスク辞書のポイント係数を設定ファイル化する仕組み
+- LINEコマンド返信の自動化（現在はログ出力のみ）
 - より包括的なテストカバレッジ
 

@@ -121,9 +121,7 @@ db-truncate: db-wait
 		$(PSQL) -v ON_ERROR_STOP=1 -c '\
 			TRUNCATE TABLE \
 				events, \
-				categories, \
 				memberships, \
-				house_settings, \
 				houses, \
 				users \
 			RESTART IDENTITY CASCADE;'; \

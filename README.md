@@ -6,9 +6,9 @@
 
 - 家事の報告（HTTP API + LINE Webhook）
 - 週次ポイント集計
-- カテゴリ重みの管理
 - 冪等性保証（重複報告の自動排除）
-- LINEコマンド（`@bot <task> [<option>]`・`@bot me`・`@bot top`・`@bot help`）
+- ハードコードされたタスク辞書によるポイント換算
+- LINEコマンド（`@bot <task> [<option>]`・`@bot me`・`@bot top`・`@bot help`）への即時返信
 
 ## セットアップ
 
@@ -28,15 +28,15 @@
 
 **オプション**:
 - `PORT`: サーバーポート（デフォルト: 8080）
-- `ADMIN_TOKEN`: 管理API用トークン（`/admin/*`エンドポイント用）
 - `LINE_CHANNEL_SECRET`: LINE Webhook署名検証用（LINE Messaging API使用時）
+- `LINE_CHANNEL_ID`: LINE返信API呼び出し用トークン（返信を有効化する場合は必須）
 
 `.env`ファイルの例:
 ```bash
 DATABASE_URL=postgres://app:app@localhost:5432/chores?sslmode=disable
 PORT=8081
-ADMIN_TOKEN=change-me-now
 LINE_CHANNEL_SECRET=your-line-channel-secret
+LINE_CHANNEL_ID=your-line-channel-token
 ```
 
 ### 起動手順
@@ -80,8 +80,7 @@ curl -X POST http://localhost:8080/events/report \
 ```
 
 - `GET /houses/{group}/weekly` - 週次集計
-- `PUT /admin/houses/{group}/categories/{name}` - カテゴリ重み編集
-- `POST /webhook` - LINE Webhook
+- `POST /webhook` - LINE Webhook（返信もここで処理）
 - `GET /healthz` - ヘルスチェック
 - `GET /debug/vars` - メトリクス
 
@@ -93,8 +92,8 @@ make migrate-up        # マイグレーション実行
 make migrate-up-safe   # バックアップ後にマイグレーション実行
 make backup            # DBバックアップ作成
 make post-chore        # 家事報告のテスト送信
-make post-buy          # 購入報告のテスト送信
 make weekly            # 週次集計の取得
+make db-truncate       # テーブル初期化（RESTART IDENTITY）
 ```
 
 ## テスト

@@ -48,6 +48,16 @@ type ReportPayload struct {
 	Note        *string `json:"note,omitempty"`
 }
 
+type WeeklyTaskSummary struct {
+	TaskKey string
+	Points  float64
+}
+
+type WeeklyUserSummary struct {
+	Total    float64
+	TaskList []WeeklyTaskSummary
+}
+
 func (s *Service) Report(ctx context.Context, p ReportPayload) error {
 	if p.GroupID == "" || p.UserID == "" {
 		return errors.New("missing required fields")
@@ -68,18 +78,13 @@ func (s *Service) Report(ctx context.Context, p ReportPayload) error {
 		return err
 	}
 	canonical := normalizeCategory(def.Key)
-
-	wt := 1.0
-	w, _ := s.rp.CategoryWeight(ctx, p.GroupID, canonical)
-	if w > 0 {
-		wt = w
-	}
-	points := def.Points * wt
+	points := def.Points
 
 	return s.rp.InsertEvent(ctx, repo.InsertEventParams{
 		ExtGroupID:  p.GroupID,
 		ExtUserID:   p.UserID,
-		Category:    &canonical,
+		TaskKey:     canonical,
+		TaskOption:  p.Option,
 		Points:      points,
 		SourceMsgID: p.SourceMsgID,
 		Now:         now,
@@ -91,7 +96,26 @@ func (s *Service) Rp() *repo.Repo {
 	return s.rp
 }
 
-func (s *Service) UpsertCategory(ctx context.Context, group, name string, weight float64) error {
-	normalized := normalizeCategory(name)
-	return s.rp.UpsertCategory(ctx, group, normalized, weight)
+func (s *Service) WeeklyUserSummary(ctx context.Context, groupID, userID string, ref time.Time) (WeeklyUserSummary, error) {
+	wd := int(ref.Weekday())
+	if wd == 0 {
+		wd = 7
+	}
+	start := time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, ref.Location()).AddDate(0, 0, -(wd - 1))
+	end := start.AddDate(0, 0, 7)
+
+	rows, err := s.rp.WeeklyUserTaskPoints(ctx, groupID, userID, start, end)
+	if err != nil {
+		return WeeklyUserSummary{}, err
+	}
+
+	summary := WeeklyUserSummary{TaskList: make([]WeeklyTaskSummary, 0, len(rows))}
+	for _, row := range rows {
+		summary.Total += row.Points
+		summary.TaskList = append(summary.TaskList, WeeklyTaskSummary{
+			TaskKey: row.TaskKey,
+			Points:  row.Points,
+		})
+	}
+	return summary, nil
 }

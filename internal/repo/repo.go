@@ -16,7 +16,6 @@ func (r *Repo) Ping(ctx context.Context) error {
 }
 
 var (
-	ErrHouseNotFound  = errors.New("house not found")
 	ErrDuplicateEvent = errors.New("duplicate event")
 )
 
@@ -35,7 +34,8 @@ type UpsertHouseUserParams struct {
 type InsertEventParams struct {
 	ExtGroupID  string
 	ExtUserID   string
-	Category    *string
+	TaskKey     string
+	TaskOption  *string
 	Points      float64
 	SourceMsgID *string
 	Now         time.Time
@@ -76,26 +76,11 @@ ON CONFLICT(house_id,user_id) DO NOTHING
 		return err
 	}
 
-	var catID *int64
-	if p.Category != nil {
-		var id int64
-		err = tx.QueryRowContext(ctx, `
-INSERT INTO categories(house_id,name,weight)
-VALUES($1,$2,1.0)
-ON CONFLICT(house_id,name) DO UPDATE SET name=EXCLUDED.name
-RETURNING id
-`, houseID, *p.Category).Scan(&id)
-		if err != nil {
-			return err
-		}
-		catID = &id
-	}
-
 	result, err := tx.ExecContext(ctx, `
-INSERT INTO events(house_id,user_id,kind,category_id,points,source_msg_id,created_at,note)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+INSERT INTO events(house_id,user_id,kind,task_key,task_option,points,source_msg_id,created_at,note)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
 ON CONFLICT(house_id, source_msg_id) DO NOTHING
-`, houseID, userID, KindChore, catID, p.Points, p.SourceMsgID, p.Now, p.Note)
+`, houseID, userID, KindChore, p.TaskKey, p.TaskOption, p.Points, p.SourceMsgID, p.Now, p.Note)
 	if err != nil {
 		return err
 	}
@@ -109,6 +94,11 @@ ON CONFLICT(house_id, source_msg_id) DO NOTHING
 type WeeklyRow struct {
 	Name   string  `json:"name"`
 	Points float64 `json:"points"`
+}
+
+type WeeklyTaskRow struct {
+	TaskKey string
+	Points  float64
 }
 
 func (r *Repo) WeeklyPoints(ctx context.Context, extGroupID string, start, end time.Time) ([]WeeklyRow, error) {
@@ -138,41 +128,32 @@ ORDER BY pt DESC
 	return out, rows.Err()
 }
 
-func (r *Repo) CategoryWeight(ctx context.Context, extGroupID, category string) (float64, error) {
-	var weight float64 = 1.0
-	err := r.db.QueryRowContext(ctx, `
-SELECT c.weight
-FROM categories c
-JOIN houses h ON h.id=c.house_id
-WHERE h.ext_group_id=$1 AND c.name=$2
-`, extGroupID, category).Scan(&weight)
+func (r *Repo) WeeklyUserTaskPoints(ctx context.Context, extGroupID, extUserID string, start, end time.Time) ([]WeeklyTaskRow, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT e.task_key,
+       COALESCE(SUM(e.points),0) AS pt
+FROM events e
+JOIN houses h ON h.id = e.house_id
+JOIN users u  ON u.id = e.user_id
+WHERE h.ext_group_id = $1
+  AND u.ext_user_id = $2
+  AND e.created_at >= $3
+  AND e.created_at < $4
+GROUP BY e.task_key
+ORDER BY pt DESC, e.task_key ASC
+`, extGroupID, extUserID, start, end)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return 1.0, nil
-		}
-		return 1.0, nil
+		return nil, err
 	}
-	return weight, nil
-}
+	defer rows.Close()
 
-func (r *Repo) UpsertCategory(ctx context.Context, extGroupID, name string, weight float64) error {
-	// まずhouseが存在するか確認
-	var houseID int64
-	err := r.db.QueryRowContext(ctx, `
-SELECT id FROM houses WHERE ext_group_id=$1
-`, extGroupID).Scan(&houseID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrHouseNotFound
+	var out []WeeklyTaskRow
+	for rows.Next() {
+		var row WeeklyTaskRow
+		if err := rows.Scan(&row.TaskKey, &row.Points); err != nil {
+			return nil, err
 		}
-		return err
+		out = append(out, row)
 	}
-
-	// カテゴリを更新/作成
-	_, err = r.db.ExecContext(ctx, `
-INSERT INTO categories(house_id,name,weight)
-VALUES($1,$2,$3)
-ON CONFLICT(house_id,name) DO UPDATE SET weight=EXCLUDED.weight
-`, houseID, name, weight)
-	return err
+	return out, rows.Err()
 }
