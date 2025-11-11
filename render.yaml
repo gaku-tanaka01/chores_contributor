@@ -1,17 +1,16 @@
 services:
   - type: web
-    name: chores-contributor-server
-    env: go
+    name: chores-contributor-server-sg
+    runtime: go
     plan: free
-    region: singapore  # ここを追加（asia側で最も近い）
+    region: singapore
     buildCommand: go build -o app ./cmd/server
     startCommand: ./app
     healthCheckPath: /healthz
     envVars:
-      - key: DATABASE_URL
+      - key: DATABASE_URL       # 例: postgres://.../postgres?sslmode=require
         sync: false
       - key: ADMIN_TOKEN
         sync: false
       - key: LINE_CHANNEL_SECRET
         sync: false
-
