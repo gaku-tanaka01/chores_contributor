@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: chores-contributor-server3
+    name: chores-contributor-server-sg
     runtime: go
     plan: free
     region: singapore
@@ -8,7 +8,9 @@ services:
     startCommand: ./app
     healthCheckPath: /healthz
     envVars:
-      - key: DATABASE_URL       # 例: postgres://.../postgres?sslmode=require
+      - key: GOTOOLCHAIN
+        value: auto          # ← これを追加
+      - key: DATABASE_URL
         sync: false
       - key: ADMIN_TOKEN
         sync: false
