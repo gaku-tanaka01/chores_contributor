@@ -23,8 +23,8 @@ import (
 func init() {
 	var envPath string
 	if os.Getenv("RENDER") != "" {
-		// Render本番環境: /etc/secrets/.env.local
-		envPath = "/etc/secrets/.env.production.local"
+		// Render本番環境: /etc/secrets/.env.local.production
+		envPath = "/etc/secrets/.env.local.production"
 	} else {
 		// ローカル開発環境: プロジェクトルートの.env.local
 		envPath = ".env.local"
