@@ -1,0 +1,17 @@
+# render.yaml
+services:
+  - type: web
+    name: chores-contributor-server
+    env: go
+    plan: free
+    autoDeploy: true
+    buildCommand: go build -o server ./cmd/server
+    startCommand: ./server
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL   # ダッシュボードで値を入れる（sync: false）
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false

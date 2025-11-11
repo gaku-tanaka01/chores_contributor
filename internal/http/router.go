@@ -49,15 +49,12 @@ func requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
-// validateSignature LINE署名を検証（HMAC-SHA256）
-func validateSignature(secret string, body []byte, signature string) bool {
-	if secret == "" || signature == "" {
-		return false
-	}
+// verifyLINE LINE署名を検証（HMAC-SHA256）
+func verifyLINE(sig string, body []byte, secret string) bool {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
-	expected := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(expected), []byte(signature))
+	calc := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(calc), []byte(sig))
 }
 
 // handleLineMessage LINEメッセージを家事報告に変換
@@ -116,8 +113,7 @@ func Router(sv *service.Service) http.Handler {
 			_, _ = w.Write([]byte("db unhealthy"))
 			return
 		}
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte("ok"))
+		w.WriteHeader(204)
 	})
 
 	// メトリクスエンドポイント
@@ -128,14 +124,12 @@ func Router(sv *service.Service) http.Handler {
 	r.Post("/webhook", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			w.WriteHeader(400)
+			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 
-		sig := r.Header.Get("X-Line-Signature")
-		secret := os.Getenv("LINE_CHANNEL_SECRET")
-		if !validateSignature(secret, body, sig) {
-			w.WriteHeader(403)
+		if !verifyLINE(r.Header.Get("X-Line-Signature"), body, os.Getenv("LINE_CHANNEL_SECRET")) {
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 
@@ -156,7 +150,7 @@ func Router(sv *service.Service) http.Handler {
 		}
 
 		if err := json.Unmarshal(body, &payload); err != nil {
-			w.WriteHeader(400)
+			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 
@@ -184,7 +178,7 @@ func Router(sv *service.Service) http.Handler {
 			}
 		}
 
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	// 家事/購入の報告（HTTP版）
