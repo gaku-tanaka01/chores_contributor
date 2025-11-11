@@ -1,0 +1,36 @@
+# Binaries
+server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output
+*.out
+
+# Go workspace
+.idea/
+
+# Environment
+.env
+.env.local
+
+# Database
+pgdata/
+backup/
+
+# Build artifacts
+dist/
+build/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+

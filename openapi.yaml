@@ -1,0 +1,184 @@
+openapi: 3.0.3
+info:
+  title: Chores API
+  version: 0.1.0
+
+paths:
+  /events/report:
+    post:
+      summary: 家事/購入の報告
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/Chore'
+                - $ref: '#/components/schemas/Purchase'
+      responses:
+        "204":
+          description: created
+        "200":
+          description: duplicate
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [duplicate]
+                  source_msg_id:
+                    type: string
+                required: [status, source_msg_id]
+        "400":
+          description: bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /houses/{group}/weekly:
+    get:
+      summary: 週次集計
+      parameters:
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  start:
+                    type: string
+                    format: date
+                  end:
+                    type: string
+                    format: date
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rank:
+                          type: integer
+                        name:
+                          type: string
+                        points:
+                          type: number
+
+  /admin/houses/{group}/categories/{name}:
+    put:
+      summary: カテゴリ重みの編集（管理者用）
+      parameters:
+        - name: group
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [weight]
+              properties:
+                weight:
+                  type: number
+                  minimum: 0
+                  exclusiveMinimum: true
+      responses:
+        "204":
+          description: updated
+        "400":
+          description: bad request
+        "403":
+          description: forbidden
+        "404":
+          description: house not found
+
+  /healthz:
+    get:
+      summary: ヘルスチェック
+      responses:
+        "200":
+          description: OK
+
+components:
+  schemas:
+    Chore:
+      type: object
+      required: [group_id, user_id, type, minutes, source_msg_id]
+      properties:
+        group_id:
+          type: string
+        user_id:
+          type: string
+        type:
+          type: string
+          enum: [chore]
+        category:
+          type: string
+        minutes:
+          type: integer
+          minimum: 1
+        source_msg_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        note:
+          type: string
+
+    Purchase:
+      type: object
+      required: [group_id, user_id, type, amount_yen, source_msg_id]
+      properties:
+        group_id:
+          type: string
+        user_id:
+          type: string
+        type:
+          type: string
+          enum: [purchase]
+        amount_yen:
+          type: integer
+          minimum: 1
+        source_msg_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        note:
+          type: string
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+  securitySchemes:
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+

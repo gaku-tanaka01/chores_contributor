@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS house_settings;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS categories;
+DROP TABLE IF EXISTS memberships;
+DROP TABLE IF EXISTS houses;
+DROP TABLE IF EXISTS users;
