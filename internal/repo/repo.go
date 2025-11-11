@@ -12,6 +12,10 @@ import (
 type Repo struct{ db *pgxpool.Pool }
 func New(db *pgxpool.Pool) *Repo { return &Repo{db: db} }
 
+func (r *Repo) Ping(ctx context.Context) error {
+	return r.db.Ping(ctx)
+}
+
 var (
 	ErrHouseNotFound   = errors.New("house not found")
 	ErrDuplicateEvent  = errors.New("duplicate event")

@@ -103,17 +103,21 @@ func Router(sv *service.Service) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	// ヘルスチェック: 無条件で200を返す（起動直後でも確実に通す）
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		// DB接続チェック（簡易版: 週次集計クエリで確認）
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// レディネスチェック: DBが準備できたか外部監視用
+	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 500*time.Millisecond)
 		defer cancel()
-		_, err := sv.Rp().WeeklyPoints(ctx, "health-check", time.Now(), time.Now())
-		if err != nil {
-			w.WriteHeader(503)
-			_, _ = w.Write([]byte("db unhealthy"))
+		if err := sv.Rp().Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("db not ready"))
 			return
 		}
-		w.WriteHeader(204)
+		w.WriteHeader(http.StatusOK)
 	})
 
 	// メトリクスエンドポイント
