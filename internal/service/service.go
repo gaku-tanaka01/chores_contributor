@@ -63,6 +63,11 @@ type CancelResult struct {
 	Points  float64
 }
 
+type GroupRankingRow struct {
+	Name   string
+	Points float64
+}
+
 func (s *Service) Report(ctx context.Context, p ReportPayload) error {
 	if p.GroupID == "" || p.UserID == "" {
 		return errors.New("missing required fields")
@@ -131,6 +136,28 @@ func (s *Service) CancelLatestEvent(ctx context.Context, groupID, userID string)
 		return CancelResult{}, err
 	}
 	return CancelResult{TaskKey: deleted.TaskKey, Points: deleted.Points}, nil
+}
+
+func (s *Service) WeeklyGroupRanking(ctx context.Context, groupID string, ref time.Time) ([]GroupRankingRow, error) {
+	wd := int(ref.Weekday())
+	if wd == 0 {
+		wd = 7
+	}
+	start := time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, ref.Location()).AddDate(0, 0, -(wd - 1))
+	end := start.AddDate(0, 0, 7)
+
+	rows, err := s.rp.WeeklyPoints(ctx, groupID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GroupRankingRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, GroupRankingRow{
+			Name:   row.Name,
+			Points: row.Points,
+		})
+	}
+	return out, nil
 }
 
 func (s *Service) TaskDefinitions() []TaskDefinition {

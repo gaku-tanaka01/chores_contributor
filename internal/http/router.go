@@ -219,8 +219,26 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 		}
 		return
 	case "top":
-		reply := "今週のランキング表示は準備中だよ。もう少し待ってて！"
-		if err := sendLineReply(ctx, e.ReplyToken, reply); err != nil {
+		ranking, err := sv.WeeklyGroupRanking(ctx, groupID, time.Now())
+		if err != nil {
+			if replyErr := sendLineReply(ctx, e.ReplyToken, "ランキング取得失敗: 少し待ってね"); replyErr != nil {
+				log.Printf("LINE reply error (top command failure): %v", replyErr)
+			}
+			log.Printf("LINE ranking error: group=%s error=%v", groupID, err)
+			return
+		}
+		if len(ranking) == 0 {
+			if err := sendLineReply(ctx, e.ReplyToken, "今週はまだ誰も報告していないみたい。"); err != nil {
+				log.Printf("LINE reply error (top command empty): %v", err)
+			}
+			return
+		}
+		lines := make([]string, 0, len(ranking)+1)
+		lines = append(lines, "今週のポイント:")
+		for i, row := range ranking {
+			lines = append(lines, fmt.Sprintf("%d位 %s %s", i+1, row.Name, formatPoints(row.Points)))
+		}
+		if err := sendLineReply(ctx, e.ReplyToken, strings.Join(lines, "\n")); err != nil {
 			log.Printf("LINE reply error (top command): %v", err)
 		}
 		return
@@ -240,7 +258,7 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 			"使い方:",
 			"・@bot 皿洗い → 家事報告",
 			"・@bot me → 今週の自分のポイント",
-			"・@bot top → 今週のTOP3 (準備中)",
+			"・@bot top → 今週のポイント一覧",
 			"・@bot 取消 → 直前の報告を取り消す",
 			"・@bot task → タスク一覧とポイント",
 			"・@bot help → このメッセージ",
