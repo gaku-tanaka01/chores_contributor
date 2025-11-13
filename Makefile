@@ -1,13 +1,16 @@
-# Makefile — migrate 操作用
+# ==== common ====
+SHELL := /usr/bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+.ONESHELL:
+.DEFAULT_GOAL := help
 
-# ==== .env を読み込む（存在すれば） ====
+# ---- optional: local .env ----
 ifneq ("$(wildcard .env)","")
 include .env
-# .env のキーを export（空白・引用符のない KEY=VAL 前提）
 export $(shell sed -ne 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' .env)
 endif
 
-# ==== 接続設定（.env 未設定ならデフォルト） ====
+# ==== defaults (local) ====
 POSTGRES_USER      ?= app
 POSTGRES_PASSWORD  ?= app
 POSTGRES_HOST      ?= localhost
@@ -15,56 +18,45 @@ POSTGRES_PORT      ?= 5432
 POSTGRES_DB        ?= chores
 SSL_MODE           ?= disable
 PORT               ?= 8081
+N                  ?= 1
 
-# DATABASE_URL が無ければ組み立てる
-DATABASE_URL       ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(SSL_MODE)
-PGURL              ?= $(DATABASE_URL)
+DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(SSL_MODE)
+PGURL        ?= $(DATABASE_URL)
 
-# ==== パス ====
-MIGRATIONS_DIR     ?= db/migrations
-BACKUP_DIR         ?= ./backup
+# ==== paths ====
+MIGRATIONS_DIR ?= db/migrations
+BACKUP_DIR     ?= ./backup
 
-# ==== コマンド ====
-MIGRATE            ?= migrate -database "$(DATABASE_URL)" -path "$(MIGRATIONS_DIR)"
-PSQL               ?= psql "$(DATABASE_URL)"
+# ==== commands ====
+MIGRATE = migrate -database "$(DATABASE_URL)" -path "$(MIGRATIONS_DIR)"
+PSQL    = psql "$(DATABASE_URL)"
 
-# ==== ヘルパ ====
-.DEFAULT_GOAL := help
-
+# ==== help ====
 .PHONY: help
-help: ## このヘルプ
+help:
 	@echo "Make targets:"
-	@echo "  make migrate-up            # すべて適用"
-	@echo "  make migrate-down [N=1]    # N 本ロールバック（デフォルト1）"
-	@echo "  make migrate-goto V=3      # バージョン V へ移動"
-	@echo "  make migrate-force V=3     # DBのバージョンを強制設定（失敗時の手当）"
-	@echo "  make migrate-drop          # すべてのテーブル削除（要確認）"
-	@echo "  make migrate-version       # 現在のバージョン表示"
-	@echo "  make migrate-create name=x # 新規マイグレーション作成（seq, .sql）"
-	@echo "  make db-wait               # DB起動待ち（ヘルス待機）"
-	@echo "  make backup                # DBバックアップ作成"
-	@echo "  make db-truncate           # 主要テーブルをTRUNCATE（RESTART IDENTITY）"
-	@echo "  make migrate-up-safe       # バックアップ後にマイグレーション実行"
-	@echo "  make post-chore            # 家事報告のテスト送信"
-	@echo "  make weekly               # 週次集計の取得"
+	@echo "  migrate-up                # すべて適用（ローカル）"
+	@echo "  migrate-down [N=1]        # N 本ロールバック"
+	@echo "  migrate-goto V=3          # バージョンへ移動"
+	@echo "  migrate-force V=3         # version 強制設定"
+	@echo "  migrate-drop              # 全削除(確認あり)"
+	@echo "  migrate-version           # 現在のバージョン"
+	@echo "  migrate-create name=x     # 新規ファイル作成"
+	@echo "  backup                    # ローカルdump (--no-owner 等付き)"
+	@echo "  db-truncate               # 主要テーブルTRUNCATE"
+	@echo "  db-wait                   # DB起動待ち"
+	@echo "  migrate-up-prod           # 本番(.env.local.production読込) 適用"
+	@echo "  migrate-down-prod [N=1]   # 本番ロールバック"
+	@echo "  backup-prod               # 本番dump"
 	@echo ""
 	@echo "env: DATABASE_URL=$(DATABASE_URL)"
 	@echo "migrations: $(MIGRATIONS_DIR)"
 	@echo "port: $(PORT)"
 
-# ==== タスク ====
-.PHONY: backup
-backup:
-	@mkdir -p $(BACKUP_DIR)
-	@pg_dump $(PGURL) -Fc -f $(BACKUP_DIR)/$$(date +%Y%m%d-%H%M).dump
-	@echo "backup created: $(BACKUP_DIR)/$$(date +%Y%m%d-%H%M).dump"
-
+# ==== local tasks ====
 .PHONY: migrate-up
 migrate-up: db-wait
 	@$(MIGRATE) up
-
-.PHONY: migrate-up-safe
-migrate-up-safe: backup migrate-up
 
 .PHONY: migrate-down
 migrate-down: db-wait
@@ -72,22 +64,18 @@ migrate-down: db-wait
 
 .PHONY: migrate-goto
 migrate-goto: db-wait
-	@if [ -z "$(V)" ]; then echo "V=version を指定しろ"; exit 2; fi
+	@test -n "$(V)" || { echo "V=version を指定"; exit 2; }
 	@$(MIGRATE) goto $(V)
 
 .PHONY: migrate-force
 migrate-force: db-wait
-	@if [ -z "$(V)" ]; then echo "V=version を指定しろ"; exit 2; fi
+	@test -n "$(V)" || { echo "V=version を指定"; exit 2; }
 	@$(MIGRATE) force $(V)
 
 .PHONY: migrate-drop
 migrate-drop: db-wait
-	@read -p "!!! ALL TABLES WILL BE DROPPED. continue? [y/N] " ans; \
-	if [ "$$ans" = "y" ] || [ "$$ans" = "Y" ]; then \
-		$(MIGRATE) drop -f; \
-	else \
-		echo "aborted"; \
-	fi
+	@read -p "!!! DROP ALL TABLES. continue? [y/N] " ans; \
+	[[ "$$ans" =~ ^[yY]$$ ]] && $(MIGRATE) drop -f || echo "aborted"
 
 .PHONY: migrate-version
 migrate-version: db-wait
@@ -95,47 +83,82 @@ migrate-version: db-wait
 
 .PHONY: migrate-create
 migrate-create:
-	@if [ -z "$(name)" ]; then echo "name=xxx を指定しろ"; exit 2; fi
+	@test -n "$(name)" || { echo "name=xxx を指定"; exit 2; }
 	@mkdir -p "$(MIGRATIONS_DIR)"
 	@migrate create -dir "$(MIGRATIONS_DIR)" -ext sql -seq "$(name)"
 
-# psql ショートカット（任意）
+.PHONY: backup
+backup:
+	@mkdir -p $(BACKUP_DIR)
+	@pg_dump $(PGURL) -Fc --no-owner --no-privileges -f $(BACKUP_DIR)/$$(date +%Y%m%d-%H%M).dump
+	@echo "backup created: $(BACKUP_DIR)/$$(date +%Y%m%d-%H%M).dump"
+
 .PHONY: sql
 sql: db-wait
 	@$(PSQL)
 
-# DBが受け付け可能になるまで待機
 .PHONY: db-wait
 db-wait:
 	@echo "waiting for postgres at $(POSTGRES_HOST):$(POSTGRES_PORT)..."
-	@for i in $$(seq 1 30); do \
-		echo "\q" | $(PSQL) >/dev/null 2>&1 && { echo "postgres is ready"; exit 0; }; \
-		sleep 1; \
-	done; \
-	echo "postgres not ready"; exit 1
+	@if command -v pg_isready >/dev/null 2>&1; then
+		for i in $$(seq 1 30); do
+			pg_isready -h $(POSTGRES_HOST) -p $(POSTGRES_PORT) >/dev/null 2>&1 && { echo "ready"; exit 0; }
+			sleep 1
+		done
+	else
+		for i in $$(seq 1 30); do
+			psql "$(DATABASE_URL)" -c '\q' >/dev/null 2>&1 && { echo "ready"; exit 0; }
+			sleep 1
+		done
+	fi
+	@echo "postgres not ready"; exit 1
 
 .PHONY: db-truncate
 db-truncate: db-wait
-	@read -p "truncate tables? this cannot be undone. continue? [y/N] " ans; \
-	if [ "$$ans" = "y" ] || [ "$$ans" = "Y" ]; then \
-		$(PSQL) -v ON_ERROR_STOP=1 -c '\
-			TRUNCATE TABLE \
-				events, \
-				memberships, \
-				houses, \
-				users \
-			RESTART IDENTITY CASCADE;'; \
-		echo "tables truncated."; \
-	else \
-		echo "aborted"; \
-	fi
+	@read -p "truncate tables? [y/N] " ans; \
+	[[ "$$ans" =~ ^[yY]$$ ]] && \
+	$(PSQL) -v ON_ERROR_STOP=1 -c "\
+		TRUNCATE TABLE \
+			events, \
+			memberships, \
+			houses, \
+			users \
+		RESTART IDENTITY CASCADE;" \
+	|| echo "aborted"
 
-# ==== curl タスク（APIテスト用） ====
-.PHONY: post-chore weekly
-post-chore:
-	@curl -sS -i -X POST http://localhost:$(PORT)/events/report \
-	  -H "Content-Type: application/json" \
-	  -d '{"group_id":"default-house","user_id":"u1","task":"皿洗い","source_msg_id":"$${ID:-test-$$RANDOM}"}' | sed -n '1p'
+# ==== prod helpers (explicit .env.local.production load) ====
+define LOAD_PROD
+set -euo pipefail
+set -a
+source .env.local.production
+set +a
+endef
 
-weekly:
-	@curl -sS "http://localhost:$(PORT)/houses/default-house/weekly" | jq .
+# prod MIGRATE alias (uses env from .env.local.production)
+define RUN_MIGRATE_PROD
+$(LOAD_PROD)
+migrate -database "$${DATABASE_URL}" -path "$${MIGRATIONS_DIR:-$(MIGRATIONS_DIR)}"
+endef
+
+.PHONY: migrate-up-prod
+migrate-up-prod:
+	@$(LOAD_PROD); \
+	read -p "Apply migrations to PRODUCTION? [y/N] " ans; \
+	if [[ "$$ans" =~ ^[yY]$$ ]]; then \
+		$(RUN_MIGRATE_PROD) up; \
+	else echo "aborted"; fi
+
+.PHONY: migrate-down-prod
+migrate-down-prod:
+	@$(LOAD_PROD); \
+	read -p "Rollback PRODUCTION N=$(N)? [y/N] " ans; \
+	if [[ "$$ans" =~ ^[yY]$$ ]]; then \
+		$(RUN_MIGRATE_PROD) down $(N); \
+	else echo "aborted"; fi
+
+.PHONY: backup-prod
+backup-prod:
+	@$(LOAD_PROD); \
+	mkdir -p $(BACKUP_DIR); \
+	pg_dump "$${DATABASE_URL}" -Fc --no-owner --no-privileges -f $(BACKUP_DIR)/$$(date +%Y%m%d-%H%M)-prod.dump; \
+	echo "backup created: $(BACKUP_DIR)/$$(date +%Y%m%d-%H%M)-prod.dump"
