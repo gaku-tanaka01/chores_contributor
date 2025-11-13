@@ -322,6 +322,13 @@ func Router(sv *service.Service) http.Handler {
 	// メトリクスエンドポイント
 	r.Mount("/debug/vars", expvar.Handler())
 
+	lineSecret := os.Getenv("LINE_CHANNEL_SECRET")
+	if lineSecret == "" {
+		log.Println("LINE_CHANNEL_SECRET length=0 (empty)")
+	} else {
+		log.Printf("LINE_CHANNEL_SECRET length=%d", len(lineSecret))
+	}
+
 	// LINE Webhook
 	// POST /webhook
 	r.Post("/webhook", func(w http.ResponseWriter, r *http.Request) {

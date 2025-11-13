@@ -1,0 +1,22 @@
+{
+  "destination": "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "events": [
+    {
+      "type": "message",
+      "replyToken": "00000000000000000000000000000000",
+      "source": {
+        "type": "group",
+        "groupId": "Gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "userId": "Uyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+      },
+      "timestamp": 1731524800000,
+      "mode": "active",
+      "message": {
+        "id": "1234567890",
+        "type": "text",
+        "text": "@bot help"
+      }
+    }
+  ]
+}
+
