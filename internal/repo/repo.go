@@ -17,6 +17,7 @@ func (r *Repo) Ping(ctx context.Context) error {
 
 var (
 	ErrDuplicateEvent = errors.New("duplicate event")
+	ErrNoEventFound   = errors.New("no event found")
 )
 
 type EventKind string
@@ -96,6 +97,12 @@ type WeeklyRow struct {
 	Points float64 `json:"points"`
 }
 
+type DeletedEvent struct {
+	TaskKey   string
+	Points    float64
+	CreatedAt time.Time
+}
+
 type WeeklyTaskRow struct {
 	TaskKey string
 	Points  float64
@@ -156,4 +163,42 @@ ORDER BY pt DESC, e.task_key ASC
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+func (r *Repo) DeleteLatestEvent(ctx context.Context, extGroupID, extUserID string) (DeletedEvent, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return DeletedEvent{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var result DeletedEvent
+	var eventID int64
+	err = tx.QueryRowContext(ctx, `
+WITH target AS (
+    SELECT e.id, e.task_key, e.points, e.created_at
+    FROM events e
+    JOIN houses h ON h.id = e.house_id
+    JOIN users u  ON u.id = e.user_id
+    WHERE h.ext_group_id = $1 AND u.ext_user_id = $2
+    ORDER BY e.created_at DESC
+    LIMIT 1
+)
+SELECT t.id, t.task_key, t.points, t.created_at FROM target t
+`, extGroupID, extUserID).Scan(&eventID, &result.TaskKey, &result.Points, &result.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DeletedEvent{}, ErrNoEventFound
+		}
+		return DeletedEvent{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE id=$1`, eventID); err != nil {
+		return DeletedEvent{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return DeletedEvent{}, err
+	}
+	return result, nil
 }

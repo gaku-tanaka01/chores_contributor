@@ -202,6 +202,22 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 			log.Printf("LINE reply error (me command): %v", err)
 		}
 		return
+	case "取消", "取り消し", "キャンセル", "cancel":
+		result, err := sv.CancelLatestEvent(ctx, groupID, e.Source.UserID)
+		if err != nil {
+			msg := "取り消し失敗: 少し待ってね"
+			if errors.Is(err, repo.ErrNoEventFound) {
+				msg = "取り消す記録がないよ。"
+			}
+			if replyErr := sendLineReply(ctx, e.ReplyToken, msg); replyErr != nil {
+				log.Printf("LINE reply error (cancel failure): %v", replyErr)
+			}
+			return
+		}
+		if err := sendLineReply(ctx, e.ReplyToken, fmt.Sprintf("直前の「%s」を取り消したよ。", result.TaskKey)); err != nil {
+			log.Printf("LINE reply error (cancel success): %v", err)
+		}
+		return
 	case "top":
 		reply := "今週のランキング表示は準備中だよ。もう少し待ってて！"
 		if err := sendLineReply(ctx, e.ReplyToken, reply); err != nil {
@@ -214,6 +230,7 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 			"・@bot 皿洗い → 家事報告",
 			"・@bot me → 今週の自分のポイント",
 			"・@bot top → 今週のTOP3 (準備中)",
+			"・@bot 取消 → 直前の報告を取り消す",
 			"・@bot help → このメッセージ",
 			"タスク名はかな/英語/タイプミス1文字まで自動補正するよ。",
 		}, "\n")

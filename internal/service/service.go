@@ -58,6 +58,11 @@ type WeeklyUserSummary struct {
 	TaskList []WeeklyTaskSummary
 }
 
+type CancelResult struct {
+	TaskKey string
+	Points  float64
+}
+
 func (s *Service) Report(ctx context.Context, p ReportPayload) error {
 	if p.GroupID == "" || p.UserID == "" {
 		return errors.New("missing required fields")
@@ -118,4 +123,12 @@ func (s *Service) WeeklyUserSummary(ctx context.Context, groupID, userID string,
 		})
 	}
 	return summary, nil
+}
+
+func (s *Service) CancelLatestEvent(ctx context.Context, groupID, userID string) (CancelResult, error) {
+	deleted, err := s.rp.DeleteLatestEvent(ctx, groupID, userID)
+	if err != nil {
+		return CancelResult{}, err
+	}
+	return CancelResult{TaskKey: deleted.TaskKey, Points: deleted.Points}, nil
 }

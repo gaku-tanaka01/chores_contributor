@@ -8,7 +8,7 @@
 - 週次ポイント集計
 - 冪等性保証（重複報告の自動排除）
 - ハードコードされたタスク辞書によるポイント換算
-- LINEコマンド（`@bot <task> [<option>]`・`@bot me`・`@bot top`・`@bot help`）への即時返信
+- LINEコマンド（`@bot <task> [<option>]`・`@bot me`・`@bot top`・`@bot help`・`@bot 取消`）への即時返信
 
 ## セットアップ
 
@@ -94,6 +94,16 @@ make backup            # DBバックアップ作成
 make post-chore        # 家事報告のテスト送信
 make weekly            # 週次集計の取得
 make db-truncate       # テーブル初期化（RESTART IDENTITY）
+```
+
+### LINEコマンド一覧
+
+```
+@bot 皿洗い         # 家事報告（alias/タイプミス補正あり）
+@bot me            # 今週の自分のポイントを返信
+@bot top           # 今週のTOP3（準備中）
+@bot 取消          # 直前に登録した報告を取り消し
+@bot help          # 使い方メッセージ
 ```
 
 ## テスト
