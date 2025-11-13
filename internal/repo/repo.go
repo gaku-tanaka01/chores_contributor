@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -35,12 +36,24 @@ type UpsertHouseUserParams struct {
 type InsertEventParams struct {
 	ExtGroupID  string
 	ExtUserID   string
+	DisplayName *string
 	TaskKey     string
 	TaskOption  *string
 	Points      float64
 	SourceMsgID *string
 	Now         time.Time
 	Note        *string
+}
+
+func trimmedOrNil(s *string) interface{} {
+	if s == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*s)
+	if trimmed == "" {
+		return nil
+	}
+	return trimmed
 }
 
 func (r *Repo) InsertEvent(ctx context.Context, p InsertEventParams) error {
@@ -62,10 +75,10 @@ RETURNING id
 
 	var userID int64
 	err = tx.QueryRowContext(ctx, `
-INSERT INTO users(ext_user_id) VALUES($1)
-ON CONFLICT(ext_user_id) DO UPDATE SET display_name=COALESCE(users.display_name, NULL)
+INSERT INTO users(ext_user_id, display_name) VALUES($1, $2)
+ON CONFLICT(ext_user_id) DO UPDATE SET display_name=COALESCE(EXCLUDED.display_name, users.display_name)
 RETURNING id
-`, p.ExtUserID).Scan(&userID)
+`, p.ExtUserID, trimmedOrNil(p.DisplayName)).Scan(&userID)
 	if err != nil {
 		return err
 	}
@@ -87,6 +100,43 @@ ON CONFLICT(house_id, source_msg_id) DO NOTHING
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return ErrDuplicateEvent
+	}
+
+	return tx.Commit()
+}
+
+func (r *Repo) UpsertHouseUser(ctx context.Context, p UpsertHouseUserParams) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var houseID int64
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO houses(ext_group_id) VALUES($1)
+ON CONFLICT(ext_group_id) DO UPDATE SET name=COALESCE(houses.name, EXCLUDED.ext_group_id)
+RETURNING id
+`, p.ExtGroupID).Scan(&houseID)
+	if err != nil {
+		return err
+	}
+
+	var userID int64
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO users(ext_user_id, display_name) VALUES($1, $2)
+ON CONFLICT(ext_user_id) DO UPDATE SET display_name=COALESCE(EXCLUDED.display_name, users.display_name)
+RETURNING id
+`, p.ExtUserID, trimmedOrNil(p.DisplayName)).Scan(&userID)
+	if err != nil {
+		return err
+	}
+
+	if _, err = tx.ExecContext(ctx, `
+INSERT INTO memberships(house_id,user_id) VALUES($1,$2)
+ON CONFLICT(house_id,user_id) DO NOTHING
+`, houseID, userID); err != nil {
+		return err
 	}
 
 	return tx.Commit()

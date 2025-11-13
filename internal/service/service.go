@@ -41,6 +41,7 @@ func normalizeCategory(s string) string {
 type ReportPayload struct {
 	GroupID     string  `json:"group_id"` // ext_group_id
 	UserID      string  `json:"user_id"`  // ext_user_id
+	DisplayName *string `json:"display_name,omitempty"`
 	Task        string  `json:"task"`
 	Option      *string `json:"option,omitempty"`
 	Type        *string `json:"type,omitempty"`
@@ -93,6 +94,7 @@ func (s *Service) Report(ctx context.Context, p ReportPayload) error {
 	return s.rp.InsertEvent(ctx, repo.InsertEventParams{
 		ExtGroupID:  p.GroupID,
 		ExtUserID:   p.UserID,
+		DisplayName: p.DisplayName,
 		TaskKey:     canonical,
 		TaskOption:  p.Option,
 		Points:      points,

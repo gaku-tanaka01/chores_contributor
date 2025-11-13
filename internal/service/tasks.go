@@ -168,32 +168,32 @@ func defaultTaskDefinitions() []TaskDefinition {
 		{
 			Key:     "皿洗い",
 			Aliases: []string{"さらあらい", "皿洗い", "洗い物", "洗いもの"},
-			Points:  BASE_POINT * 3,
+			Points:  BASE_POINT * 1.5,
 		},
 		{
 			Key:     "ごはん作り",
-			Aliases: []string{"ごはん作り", "ご飯作り", "ご飯", "ごはん","晩飯作り","夕飯作り","夕飯"},
-			Points:  BASE_POINT * 3,
+			Aliases: []string{"ごはん作り", "ごはんづくり", "ご飯作り", "ご飯づくり", "料理", "調理", "晩ご飯", "夕飯"},
+			Points:  BASE_POINT * 3.0,
 		},
 		{
-			Key:     "洗濯",
-			Aliases: []string{"せんたく", "洗濯", "洗濯物", "せんたくもの", "せんたく物"},
-			Points:  BASE_POINT,
+			Key:     "洗濯（ドラム式）",
+			Aliases: []string{"洗濯", "せんたく", "洗濯物", "せんたくもの", "せんたく物"},
+			Points:  BASE_POINT * 1.0,
 		},
 		{
 			Key:     "ゴミ出し",
 			Aliases: []string{"ごみだし", "ゴミ出し", "ゴミ", "ごみ"},
-			Points:  BASE_POINT * 1.5,
+			Points:  BASE_POINT * 1.0,
 		},
 		{
 			Key:     "買い出し",
 			Aliases: []string{"買出し", "買い出し", "買い物", "買いもの", "かいもの"},
-			Points:  BASE_POINT * 4,
+			Points:  BASE_POINT * 2.5,
 		},
 		{
 			Key:     "風呂掃除",
 			Aliases: []string{"ふろそうじ", "風呂掃除", "風呂清掃", "風呂", "ふろ"},
-			Points:  BASE_POINT * 1.5,
+			Points:  BASE_POINT * 2.0,
 		},
 		{
 			Key:     "トイレ掃除",
@@ -203,17 +203,17 @@ func defaultTaskDefinitions() []TaskDefinition {
 		{
 			Key:     "床掃除",
 			Aliases: []string{"ゆかそうじ", "床掃除", "床清掃", "床", "ゆか"},
-			Points:  BASE_POINT * 3,
+			Points:  BASE_POINT * 2.0,
 		},
 		{
 			Key:     "洗面台掃除",
 			Aliases: []string{"洗面台掃除", "洗面台清掃", "せんめんだい", "せんめんだいそうじ", "洗面台"},
-			Points:  BASE_POINT * 3,
+			Points:  BASE_POINT * 2.0,
 		},
 		{
 			Key:     "風呂排水溝",
 			Aliases: []string{"風呂の排水溝", "排水溝風呂", "風呂排水溝", "風呂の排水溝"},
-			Points:  BASE_POINT * 3,
+			Points:  BASE_POINT * 3.0,
 		},
 	}
 }

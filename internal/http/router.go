@@ -14,6 +14,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -73,6 +74,11 @@ type lineReplyRequest struct {
 }
 
 const lineReplyEndpoint = "https://api.line.me/v2/bot/message/reply"
+const lineAPIBase = "https://api.line.me/v2/bot"
+
+type lineProfileResponse struct {
+	DisplayName string `json:"displayName"`
+}
 
 func sendLineReply(ctx context.Context, replyToken string, texts ...string) error {
 	if replyToken == "" {
@@ -174,6 +180,18 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 		} else {
 			groupID = e.Source.UserID
 		}
+	}
+
+	displayName, fetchErr := fetchLineDisplayName(ctx, e.Source)
+	if fetchErr != nil {
+		log.Printf("LINE profile fetch failed: group=%s room=%s user=%s err=%v", e.Source.GroupID, e.Source.RoomID, e.Source.UserID, fetchErr)
+	}
+	if err := sv.Rp().UpsertHouseUser(ctx, repo.UpsertHouseUserParams{
+		ExtGroupID:  groupID,
+		ExtUserID:   e.Source.UserID,
+		DisplayName: displayName,
+	}); err != nil {
+		log.Printf("LINE user upsert failed: group=%s user=%s err=%v", groupID, e.Source.UserID, err)
 	}
 
 	cmd := strings.ToLower(fields[0])
@@ -280,6 +298,7 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 	payload := service.ReportPayload{
 		GroupID:     groupID,
 		UserID:      e.Source.UserID,
+		DisplayName: displayName,
 		Task:        task,
 		Option:      option,
 		SourceMsgID: &e.Message.ID,
@@ -311,6 +330,58 @@ func formatPoints(pt float64) string {
 		return fmt.Sprintf("%.0fpt", math.Round(pt))
 	}
 	return fmt.Sprintf("%.1fpt", pt)
+}
+
+func fetchLineDisplayName(ctx context.Context, src lineSource) (*string, error) {
+	if src.UserID == "" {
+		return nil, errors.New("line source user id is empty")
+	}
+
+	token := os.Getenv("LINE_CHANNEL_ACCESS_TOKEN")
+	if token == "" {
+		return nil, errors.New("LINE_CHANNEL_ACCESS_TOKEN not set")
+	}
+
+	var endpoint string
+	switch {
+	case src.GroupID != "":
+		endpoint = fmt.Sprintf("%s/group/%s/member/%s", lineAPIBase, url.PathEscape(src.GroupID), url.PathEscape(src.UserID))
+	case src.RoomID != "":
+		endpoint = fmt.Sprintf("%s/room/%s/member/%s", lineAPIBase, url.PathEscape(src.RoomID), url.PathEscape(src.UserID))
+	default:
+		endpoint = fmt.Sprintf("%s/profile/%s", lineAPIBase, url.PathEscape(src.UserID))
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("line profile not accessible: status=%d", resp.StatusCode)
+	}
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("line profile fetch failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var profile lineProfileResponse
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		return nil, err
+	}
+
+	name := strings.TrimSpace(profile.DisplayName)
+	if name == "" {
+		return nil, nil
+	}
+	return &name, nil
 }
 
 func Router(sv *service.Service) http.Handler {
