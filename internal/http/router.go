@@ -78,9 +78,9 @@ func sendLineReply(ctx context.Context, replyToken string, texts ...string) erro
 	if replyToken == "" {
 		return errors.New("empty reply token")
 	}
-	token := os.Getenv("LINE_CHANNEL_ID")
+	token := os.Getenv("LINE_CHANNEL_ACCESS_TOKEN")
 	if token == "" {
-		return errors.New("LINE_CHANNEL_ID not set")
+		return errors.New("LINE_CHANNEL_ACCESS_TOKEN not set")
 	}
 
 	msgs := make([]lineReplyMessage, 0, len(texts))
@@ -327,6 +327,12 @@ func Router(sv *service.Service) http.Handler {
 		log.Println("LINE_CHANNEL_SECRET length=0 (empty)")
 	} else {
 		log.Printf("LINE_CHANNEL_SECRET length=%d", len(lineSecret))
+	}
+	lineToken := os.Getenv("LINE_CHANNEL_ACCESS_TOKEN")
+	if lineToken == "" {
+		log.Println("LINE_CHANNEL_ACCESS_TOKEN length=0 (empty)")
+	} else {
+		log.Printf("LINE_CHANNEL_ACCESS_TOKEN length=%d", len(lineToken))
 	}
 
 	// LINE Webhook
