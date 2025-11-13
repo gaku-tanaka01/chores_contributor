@@ -168,7 +168,7 @@ func defaultTaskDefinitions() []TaskDefinition {
 		{
 			Key:     "皿洗い",
 			Aliases: []string{"さらあらい", "皿洗い", "洗い物", "洗いもの"},
-			Points:  BASE_POINT * 1.5,
+			Points:  BASE_POINT * 1.8,
 		},
 		{
 			Key:     "ごはん作り",
@@ -193,7 +193,7 @@ func defaultTaskDefinitions() []TaskDefinition {
 		{
 			Key:     "風呂掃除",
 			Aliases: []string{"ふろそうじ", "風呂掃除", "風呂清掃", "風呂", "ふろ"},
-			Points:  BASE_POINT * 2.0,
+			Points:  BASE_POINT * 1.5,
 		},
 		{
 			Key:     "トイレ掃除",
