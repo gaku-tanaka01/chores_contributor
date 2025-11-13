@@ -10,12 +10,14 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -332,6 +334,134 @@ func formatPoints(pt float64) string {
 	return fmt.Sprintf("%.1fpt", pt)
 }
 
+func readableAliases(key string, aliases []string) string {
+	out := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		if alias == key {
+			continue
+		}
+		out = append(out, alias)
+	}
+	if len(out) == 0 {
+		return "―"
+	}
+	return strings.Join(out, ", ")
+}
+
+func weekRange(ref time.Time) (time.Time, time.Time) {
+	wd := int(ref.Weekday())
+	if wd == 0 {
+		wd = 7
+	}
+	start := time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, ref.Location()).AddDate(0, 0, -(wd - 1))
+	end := start.AddDate(0, 0, 7)
+	return start, end
+}
+
+var tasksPageTmpl = template.Must(template.New("tasks").
+	Funcs(template.FuncMap{
+		"formatPoints": formatPoints,
+	}).Parse(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>家事タスク一覧</title>
+  <style>
+    body { font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; margin: 24px; color: #1f2933; }
+    h1 { margin-bottom: 16px; }
+    table { border-collapse: collapse; width: 100%; max-width: 840px; }
+    th, td { border: 1px solid #cbd2d9; padding: 8px 12px; text-align: left; vertical-align: top; }
+    th { background: #f5f7fa; }
+    tbody tr:nth-child(even) { background: #f8fafc; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b0d12; color: #e5e7eb; }
+      table { border-color: #2d3748; }
+      th, td { border-color: #2d3748; }
+      th { background: #1f2937; }
+      tbody tr:nth-child(even) { background: #111827; }
+    }
+  </style>
+</head>
+<body>
+  <h1>登録家事タスク一覧</h1>
+  <p>ポイントは標準的な家事の負荷を基準にしています。</p>
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">タスク名</th>
+        <th scope="col">ポイント</th>
+        <th scope="col">別名</th>
+      </tr>
+    </thead>
+    <tbody>
+    {{range .Tasks}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td>{{formatPoints .Points}}</td>
+        <td>{{.Aliases}}</td>
+      </tr>
+    {{else}}
+      <tr><td colspan="3">登録済みのタスクがありません。</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</body>
+</html>`))
+
+var weeklyTopTmpl = template.Must(template.New("weeklyTop").
+	Funcs(template.FuncMap{
+		"formatPoints": formatPoints,
+	}).Parse(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>{{.Group}} の週間ランキング</title>
+  <style>
+    body { font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; margin: 24px; color: #1f2933; }
+    h1 { margin-bottom: 12px; }
+    p { margin: 4px 0 16px; }
+    table { border-collapse: collapse; width: 100%; max-width: 640px; }
+    th, td { border: 1px solid #cbd2d9; padding: 8px 12px; text-align: left; }
+    th { background: #f5f7fa; }
+    tbody tr:nth-child(even) { background: #f8fafc; }
+    .empty { margin-top: 24px; font-style: italic; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b0d12; color: #e5e7eb; }
+      table { border-color: #2d3748; }
+      th, td { border-color: #2d3748; }
+      th { background: #1f2937; }
+      tbody tr:nth-child(even) { background: #111827; }
+    }
+  </style>
+</head>
+<body>
+  <h1>{{.Group}} の週間ランキング</h1>
+  <p>集計期間: {{.RangeStart}} 〜 {{.RangeEnd}}</p>
+  {{if .Rows}}
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">順位</th>
+        <th scope="col">名前</th>
+        <th scope="col">ポイント</th>
+      </tr>
+    </thead>
+    <tbody>
+    {{range .Rows}}
+      <tr>
+        <td>{{.Rank}}</td>
+        <td>{{.Name}}</td>
+        <td>{{formatPoints .Points}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="empty">今週はまだ報告がありません。</p>
+  {{end}}
+</body>
+</html>`))
+
 func fetchLineDisplayName(ctx context.Context, src lineSource) (*string, error) {
 	if src.UserID == "" {
 		return nil, errors.New("line source user id is empty")
@@ -531,12 +661,7 @@ func Router(sv *service.Service) http.Handler {
 				ref = t
 			}
 		}
-		wd := int(ref.Weekday())
-		if wd == 0 {
-			wd = 7
-		}
-		start := time.Date(ref.Year(), ref.Month(), ref.Day(), 0, 0, 0, 0, ref.Location()).AddDate(0, 0, -(wd - 1))
-		end := start.AddDate(0, 0, 7)
+		start, end := weekRange(ref)
 
 		rows, err := sv.Rp().WeeklyPoints(r.Context(), group, start, end)
 		if err != nil {
@@ -561,6 +686,92 @@ func Router(sv *service.Service) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
+	})
+
+	// 家事タスク一覧（HTML）
+	r.Get("/tasks", func(w http.ResponseWriter, r *http.Request) {
+		defs := sv.TaskDefinitions()
+		sort.Slice(defs, func(i, j int) bool {
+			if defs[i].Points == defs[j].Points {
+				return defs[i].Key < defs[j].Key
+			}
+			return defs[i].Points > defs[j].Points
+		})
+		type row struct {
+			Name    string
+			Points  float64
+			Aliases string
+		}
+		data := struct {
+			Tasks []row
+		}{
+			Tasks: make([]row, 0, len(defs)),
+		}
+		for _, def := range defs {
+			data.Tasks = append(data.Tasks, row{
+				Name:    def.Key,
+				Points:  def.Points,
+				Aliases: readableAliases(def.Key, def.Aliases),
+			})
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := tasksPageTmpl.Execute(w, data); err != nil {
+			log.Printf("tasks page render error: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
+	})
+
+	// 週間ランキング（HTML）
+	r.Get("/houses/{group}/top", func(w http.ResponseWriter, r *http.Request) {
+		group := chi.URLParam(r, "group")
+		if strings.TrimSpace(group) == "" {
+			http.Error(w, "group is required", http.StatusBadRequest)
+			return
+		}
+		dateStr := r.URL.Query().Get("date")
+		ref := time.Now()
+		if dateStr != "" {
+			if t, err := time.Parse("2006-01-02", dateStr); err == nil {
+				ref = t
+			}
+		}
+		start, end := weekRange(ref)
+
+		ranking, err := sv.WeeklyGroupRanking(r.Context(), group, ref)
+		if err != nil {
+			log.Printf("weekly top error: group=%s err=%v", group, err)
+			http.Error(w, "ranking fetch failed", http.StatusInternalServerError)
+			return
+		}
+		type row struct {
+			Rank   int
+			Name   string
+			Points float64
+		}
+		data := struct {
+			Group      string
+			RangeStart string
+			RangeEnd   string
+			Rows       []row
+		}{
+			Group:      group,
+			RangeStart: start.Format("2006-01-02"),
+			RangeEnd:   end.AddDate(0, 0, -1).Format("2006-01-02"),
+			Rows:       make([]row, 0, len(ranking)),
+		}
+		for i, item := range ranking {
+			data.Rows = append(data.Rows, row{
+				Rank:   i + 1,
+				Name:   item.Name,
+				Points: item.Points,
+			})
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := weeklyTopTmpl.Execute(w, data); err != nil {
+			log.Printf("weekly top render error: group=%s err=%v", group, err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+		}
 	})
 
 	return r
