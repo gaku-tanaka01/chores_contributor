@@ -38,10 +38,20 @@ type lineWebhookPayload struct {
 }
 
 type lineEvent struct {
-	Type       string      `json:"type"`
-	ReplyToken string      `json:"replyToken"`
-	Source     lineSource  `json:"source"`
-	Message    lineMessage `json:"message"`
+	Type            string               `json:"type"`
+	ReplyToken      string               `json:"replyToken"`
+	Source          lineSource           `json:"source"`
+	Message         lineMessage          `json:"message"`
+	DeliveryContext *lineDeliveryContext `json:"deliveryContext,omitempty"`
+	WebhookEventID  string               `json:"webhookEventId"`
+}
+
+type lineDeliveryContext struct {
+	IsRedelivery bool `json:"isRedelivery"`
+}
+
+func (e lineEvent) isRedelivery() bool {
+	return e.DeliveryContext != nil && e.DeliveryContext.IsRedelivery
 }
 
 type lineSource struct {
@@ -312,6 +322,10 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 		var msg string
 		switch {
 		case errors.Is(err, repo.ErrDuplicateEvent):
+			if e.isRedelivery() {
+				log.Printf("LINE redelivery duplicate ignored: event_id=%s group=%s user=%s msg_id=%s", e.WebhookEventID, groupID, e.Source.UserID, e.Message.ID)
+				return
+			}
 			msg = "重複: この報告は登録済みだよ"
 		case errors.Is(err, service.ErrTaskNotFound):
 			msg = fmt.Sprintf("不明: \"%s\"", task)
