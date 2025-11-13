@@ -356,7 +356,11 @@ func Router(sv *service.Service) http.Handler {
 		for _, e := range payload.Events {
 			if e.Type == "message" && e.Message.Type == "text" {
 				eventCopy := e
-				go handleLineMessage(r.Context(), sv, payload.Destination, eventCopy)
+				go func(ev lineEvent) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					handleLineMessage(ctx, sv, payload.Destination, ev)
+				}(eventCopy)
 			}
 		}
 
