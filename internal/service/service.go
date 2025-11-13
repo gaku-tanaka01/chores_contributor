@@ -132,3 +132,9 @@ func (s *Service) CancelLatestEvent(ctx context.Context, groupID, userID string)
 	}
 	return CancelResult{TaskKey: deleted.TaskKey, Points: deleted.Points}, nil
 }
+
+func (s *Service) TaskDefinitions() []TaskDefinition {
+	out := make([]TaskDefinition, len(taskDefinitions))
+	copy(out, taskDefinitions)
+	return out
+}

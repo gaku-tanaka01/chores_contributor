@@ -224,6 +224,17 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 			log.Printf("LINE reply error (top command): %v", err)
 		}
 		return
+	case "task", "tasks":
+		defs := sv.TaskDefinitions()
+		lines := make([]string, 0, len(defs)+1)
+		lines = append(lines, "登録タスクとポイント:")
+		for _, def := range defs {
+			lines = append(lines, fmt.Sprintf("・%s: %s", def.Key, formatPoints(def.Points)))
+		}
+		if err := sendLineReply(ctx, e.ReplyToken, strings.Join(lines, "\n")); err != nil {
+			log.Printf("LINE reply error (task command): %v", err)
+		}
+		return
 	case "help":
 		helpText := strings.Join([]string{
 			"使い方:",
@@ -231,6 +242,7 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 			"・@bot me → 今週の自分のポイント",
 			"・@bot top → 今週のTOP3 (準備中)",
 			"・@bot 取消 → 直前の報告を取り消す",
+			"・@bot task → タスク一覧とポイント",
 			"・@bot help → このメッセージ",
 			"タスク名はかな/英語/タイプミス1文字まで自動補正するよ。",
 		}, "\n")
@@ -344,13 +356,13 @@ func Router(sv *service.Service) http.Handler {
 			return
 		}
 
-	sig := r.Header.Get("X-Line-Signature")
-	secret := os.Getenv("LINE_CHANNEL_SECRET")
-	if !verifyLINE(sig, body, secret) {
-		log.Printf("LINE signature mismatch: headerLen=%d bodyLen=%d secretLen=%d", len(sig), len(body), len(secret))
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
+		sig := r.Header.Get("X-Line-Signature")
+		secret := os.Getenv("LINE_CHANNEL_SECRET")
+		if !verifyLINE(sig, body, secret) {
+			log.Printf("LINE signature mismatch: headerLen=%d bodyLen=%d secretLen=%d", len(sig), len(body), len(secret))
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 
 		var payload lineWebhookPayload
 
