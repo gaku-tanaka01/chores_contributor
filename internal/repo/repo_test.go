@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"regexp"
@@ -67,7 +68,7 @@ SELECT t.id, t.task_key, t.points, t.created_at FROM target t
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	out, err := r.DeleteLatestEvent(nil, "g1", "u1")
+	out, err := r.DeleteLatestEvent(context.Background(), "g1", "u1")
 	if err != nil {
 		t.Fatalf("DeleteLatestEvent returned error: %v", err)
 	}
@@ -104,7 +105,7 @@ SELECT t.id, t.task_key, t.points, t.created_at FROM target t
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 
-	_, err = r.DeleteLatestEvent(nil, "g1", "u1")
+	_, err = r.DeleteLatestEvent(context.Background(), "g1", "u1")
 	if !errors.Is(err, ErrNoEventFound) {
 		t.Fatalf("expected ErrNoEventFound, got %v", err)
 	}
@@ -143,7 +144,7 @@ SELECT t.id, t.task_key, t.points, t.created_at FROM target t
 		WillReturnError(errors.New("delete failed"))
 	mock.ExpectRollback()
 
-	_, err = r.DeleteLatestEvent(nil, "g1", "u1")
+	_, err = r.DeleteLatestEvent(context.Background(), "g1", "u1")
 	if err == nil || err.Error() != "delete failed" {
 		t.Fatalf("expected delete failed error, got %v", err)
 	}

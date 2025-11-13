@@ -213,12 +213,13 @@ func handleLineMessage(ctx context.Context, sv *service.Service, botID string, e
 			}
 			return
 		}
-		breakdown := make([]string, 0, len(summary.TaskList))
+		lines := make([]string, 0, len(summary.TaskList)+2)
+		lines = append(lines, fmt.Sprintf("今週: %s", formatPoints(summary.Total)))
+		lines = append(lines, "内訳:")
 		for _, item := range summary.TaskList {
-			breakdown = append(breakdown, fmt.Sprintf("%s:%s", item.TaskKey, formatPoints(item.Points)))
+			lines = append(lines, fmt.Sprintf("・%s %s", item.TaskKey, formatPoints(item.Points)))
 		}
-		msg := fmt.Sprintf("今週:%s (%s)", formatPoints(summary.Total), strings.Join(breakdown, ", "))
-		if err := sendLineReply(ctx, e.ReplyToken, msg); err != nil {
+		if err := sendLineReply(ctx, e.ReplyToken, strings.Join(lines, "\n")); err != nil {
 			log.Printf("LINE reply error (me command): %v", err)
 		}
 		return
