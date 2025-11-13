@@ -338,10 +338,13 @@ func Router(sv *service.Service) http.Handler {
 			return
 		}
 
-		if !verifyLINE(r.Header.Get("X-Line-Signature"), body, os.Getenv("LINE_CHANNEL_SECRET")) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
+	sig := r.Header.Get("X-Line-Signature")
+	secret := os.Getenv("LINE_CHANNEL_SECRET")
+	if !verifyLINE(sig, body, secret) {
+		log.Printf("LINE signature mismatch: headerLen=%d bodyLen=%d secretLen=%d", len(sig), len(body), len(secret))
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 
 		var payload lineWebhookPayload
 
